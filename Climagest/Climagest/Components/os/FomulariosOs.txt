@@ -1,0 +1,165 @@
+import React, { useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Save, X } from "lucide-react";
+import { format } from "date-fns";
+
+export default function FormularioOS({ os, ativos, onSave, onCancel, isProcessing }) {
+  const [formData, setFormData] = useState(os || {
+    numero_os: `OS-${Date.now()}`,
+    ativo_id: '',
+    ativo_codigo: '',
+    tipo_os: 'corretiva',
+    status: 'pendente',
+    prioridade: 'media',
+    data_abertura: format(new Date(), 'yyyy-MM-dd'),
+    data_prevista: format(new Date(), 'yyyy-MM-dd'),
+    descricao_problema: '',
+    observacoes: ''
+  });
+
+  const handleChange = (field, value) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleAtivoChange = (ativoId) => {
+    const ativo = ativos.find(a => a.id === ativoId);
+    setFormData(prev => ({
+      ...prev,
+      ativo_id: ativoId,
+      ativo_codigo: ativo?.codigo || ''
+    }));
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onSave(formData);
+  };
+
+  return (
+    <Card className="shadow-lg border-none">
+      <CardHeader className="border-b border-slate-200 bg-gradient-to-r from-orange-50 to-red-50">
+        <CardTitle className="text-xl font-bold text-slate-900">
+          {os ? 'Editar Ordem de Serviço' : 'Nova Ordem de Serviço'}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-6">
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <Label htmlFor="numero_os">Número da OS</Label>
+              <Input
+                id="numero_os"
+                value={formData.numero_os}
+                onChange={(e) => handleChange('numero_os', e.target.value)}
+                disabled
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="tipo_os">Tipo de OS</Label>
+              <Select value={formData.tipo_os} onValueChange={(v) => handleChange('tipo_os', v)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="preventiva">Preventiva</SelectItem>
+                  <SelectItem value="corretiva">Corretiva</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="ativo_id">Ativo *</Label>
+              <Select value={formData.ativo_id} onValueChange={handleAtivoChange} required>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione o ativo" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ativos.map(ativo => (
+                    <SelectItem key={ativo.id} value={ativo.id}>
+                      {ativo.codigo} - {ativo.nome}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="prioridade">Prioridade</Label>
+              <Select value={formData.prioridade} onValueChange={(v) => handleChange('prioridade', v)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="baixa">Baixa</SelectItem>
+                  <SelectItem value="media">Média</SelectItem>
+                  <SelectItem value="alta">Alta</SelectItem>
+                  <SelectItem value="urgente">Urgente</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="data_abertura">Data de Abertura</Label>
+              <Input
+                id="data_abertura"
+                type="date"
+                value={formData.data_abertura}
+                onChange={(e) => handleChange('data_abertura', e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="data_prevista">Data Prevista</Label>
+              <Input
+                id="data_prevista"
+                type="date"
+                value={formData.data_prevista}
+                onChange={(e) => handleChange('data_prevista', e.target.value)}
+              />
+            </div>
+
+            {formData.tipo_os === 'corretiva' && (
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="descricao_problema">Descrição do Problema *</Label>
+                <Textarea
+                  id="descricao_problema"
+                  value={formData.descricao_problema}
+                  onChange={(e) => handleChange('descricao_problema', e.target.value)}
+                  rows={4}
+                  required={formData.tipo_os === 'corretiva'}
+                />
+              </div>
+            )}
+
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="observacoes">Observações</Label>
+              <Textarea
+                id="observacoes"
+                value={formData.observacoes}
+                onChange={(e) => handleChange('observacoes', e.target.value)}
+                rows={3}
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-6">
+            <Button type="button" variant="outline" onClick={onCancel} disabled={isProcessing}>
+              <X className="w-4 h-4 mr-2" />
+              Cancelar
+            </Button>
+            <Button type="submit" disabled={isProcessing} className="bg-orange-600 hover:bg-orange-700">
+              <Save className="w-4 h-4 mr-2" />
+              {os ? 'Atualizar' : 'Criar OS'}
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}

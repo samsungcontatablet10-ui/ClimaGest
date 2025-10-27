@@ -1,0 +1,111 @@
+import React from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery } from "@tanstack/react-query";
+import { Package, Wrench, CheckCircle, TrendingUp, DollarSign, Clock } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+
+import KPICard from "../components/dashboard/KPICard";
+import CalendarioManutencao from "../components/dashboard/CalendarioManutencao";
+import AlertasAtivos from "../components/dashboard/AlertasAtivos";
+
+export default function Dashboard() {
+  const { data: ativos, isLoading: loadingAtivos } = useQuery({
+    queryKey: ['ativos'],
+    queryFn: () => base44.entities.Ativo.list(),
+    initialData: [],
+  });
+
+  const { data: ordensServico, isLoading: loadingOS } = useQuery({
+    queryKey: ['ordensServico'],
+    queryFn: () => base44.entities.OrdemServico.list('-created_date'),
+    initialData: [],
+  });
+
+  const osPreventivas = ordensServico.filter(os => os.tipo_os === 'preventiva');
+  const osConcluidas = ordensServico.filter(os => os.status === 'concluida');
+  const osAtrasadas = ordensServico.filter(os => {
+    if (os.status === 'concluida' || !os.data_prevista) return false;
+    return new Date(os.data_prevista) < new Date();
+  });
+  
+  const percentualConcluidas = osPreventivas.length > 0 
+    ? ((osConcluidas.filter(os => os.tipo_os === 'preventiva').length / osPreventivas.length) * 100).toFixed(0)
+    : 0;
+
+  const custoTotal = ordensServico.reduce((sum, os) => sum + (os.custo_total || 0), 0);
+  const custoMedio = ordensServico.length > 0 ? custoTotal / ordensServico.length : 0;
+
+  const tempoMedioReparo = ordensServico
+    .filter(os => os.tipo_os === 'corretiva' && os.status === 'concluida' && os.horas_gastas)
+    .reduce((sum, os, idx, arr) => sum + os.horas_gastas / arr.length, 0);
+
+  const isLoading = loadingAtivos || loadingOS;
+
+  return (
+    <div className="min-h-screen p-4 md:p-8">
+      <div className="max-w-7xl mx-auto space-y-8">
+        <div>
+          <h1 className="text-4xl font-bold text-slate-900 mb-2">Painel de Controle</h1>
+          <p className="text-slate-600">Visão geral do sistema de gestão de ativos</p>
+        </div>
+
+        {isLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {[1, 2, 3, 4].map(i => (
+              <Skeleton key={i} className="h-32 rounded-xl" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <KPICard
+              title="Total de Ativos"
+              value={ativos.length}
+              subtitle={`${ativos.filter(a => a.status_operacional === 'operacional').length} operacionais`}
+              icon={Package}
+              color="blue"
+            />
+            <KPICard
+              title="Preventivas Concluídas"
+              value={`${percentualConcluidas}%`}
+              subtitle={`${osConcluidas.filter(os => os.tipo_os === 'preventiva').length} de ${osPreventivas.length}`}
+              icon={CheckCircle}
+              color="green"
+            />
+            <KPICard
+              title="Custo Médio/Mês"
+              value={`R$ ${custoMedio.toFixed(2)}`}
+              subtitle={`Total: R$ ${custoTotal.toFixed(2)}`}
+              icon={DollarSign}
+              color="purple"
+            />
+            <KPICard
+              title="Tempo Médio Reparo"
+              value={`${tempoMedioReparo.toFixed(1)}h`}
+              subtitle="Média de corretivas"
+              icon={Clock}
+              color="orange"
+            />
+          </div>
+        )}
+
+        <div className="grid lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2">
+            {isLoading ? (
+              <Skeleton className="h-96 rounded-xl" />
+            ) : (
+              <CalendarioManutencao ordensServico={ordensServico} />
+            )}
+          </div>
+          
+          <div>
+            {isLoading ? (
+              <Skeleton className="h-96 rounded-xl" />
+            ) : (
+              <AlertasAtivos ordensServico={ordensServico} ativos={ativos} />
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

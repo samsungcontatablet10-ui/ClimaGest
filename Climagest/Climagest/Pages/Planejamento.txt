@@ -1,0 +1,603 @@
+
+import React, { useState, useMemo } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Calendar, CheckCircle, Clock, AlertCircle, Plus, Loader2, Filter } from "lucide-react";
+import { format, startOfYear, eachWeekOfInterval, addWeeks, isSameWeek, parseISO, getWeek } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+export default function Planejamento() {
+  const [anoAtual, setAnoAtual] = useState(2026);
+  const [gerandoOS, setGerandoOS] = useState(false);
+  const [mostrarDialogGerar, setMostrarDialogGerar] = useState(false);
+  
+  // Filtros
+  const [filtroFrequencia, setFiltroFrequencia] = useState('todos');
+  const [filtroSetor, setFiltroSetor] = useState('todos');
+  const [numSemanasVisiveis, setNumSemanasVisiveis] = useState(30); // Mostrar primeiras 30 semanas
+  
+  const queryClient = useQueryClient();
+
+  const { data: ativos } = useQuery({
+    queryKey: ['ativos'],
+    queryFn: () => base44.entities.Ativo.list(),
+    initialData: [],
+  });
+
+  const { data: ordensServico } = useQuery({
+    queryKey: ['ordensServico'],
+    queryFn: () => base44.entities.OrdemServico.list(),
+    initialData: [],
+  });
+
+  const createOSMutation = useMutation({
+    mutationFn: (osData) => base44.entities.OrdemServico.create(osData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ordensServico'] });
+    },
+  });
+
+  // Setores disponíveis
+  const setoresDisponiveis = useMemo(() => {
+    const setores = new Set(ativos.map(a => a.localizacao_primaria).filter(Boolean));
+    return Array.from(setores).sort();
+  }, [ativos]);
+
+  // Gerar todas as semanas do ano
+  const semanasDoAno = useMemo(() => {
+    const inicio = startOfYear(new Date(anoAtual, 0, 1));
+    const semanas = [];
+    // Generate 53 weeks to ensure all days of the year are covered,
+    // as some years have 53 ISO weeks. We will slice later if needed.
+    for (let i = 0; i < 53; i++) { 
+      semanas.push(addWeeks(inicio, i));
+    }
+    return semanas.slice(0, numSemanasVisiveis);
+  }, [anoAtual, numSemanasVisiveis]);
+
+  // Calcular em quais semanas cada ativo precisa de manutenção
+  const manutencoesPlanejadas = useMemo(() => {
+    const resultado = {};
+    
+    ativos.forEach(ativo => {
+      if (!ativo.frequencia_preventiva) return;
+      
+      // Apenas manutenções mensais e semestrais para este novo planejamento
+      if (ativo.frequencia_preventiva !== 'mensal' && ativo.frequencia_preventiva !== 'semestral') return;
+      
+      resultado[ativo.id] = {}; // Initialize for this asset
+      
+      const plannedEventsForAsset = {}; // Temporary storage for this asset's events
+
+      // Define standard weeks for 10 monthly + 2 semi-annual for assets with 'mensal' frequency
+      const stdSemanasSemestrais = [0, 26]; // Semana 1 (index 0) and Semana 27 (index 26)
+      const stdSemanasMensais = [3, 7, 11, 15, 19, 23, 30, 34, 38, 42]; // Semana 4, 8, 12, 16, 20, 24, 31, 35, 39, 43 (0-indexed)
+      
+      if (ativo.frequencia_preventiva === 'mensal') {
+        // Add semi-annual events first (higher priority, these replace monthly if coinciding)
+        stdSemanasSemestrais.forEach(semanaIndex => {
+          if (semanaIndex < semanasDoAno.length) {
+            plannedEventsForAsset[semanaIndex] = {
+              tipoManutencao: 'semestral',
+              descricaoSuffix: `semestral - Semana ${semanaIndex + 1}/${anoAtual}`
+            };
+          }
+        });
+
+        // Add monthly events, but only if the week isn't already taken by a semestral event
+        stdSemanasMensais.forEach(semanaIndex => {
+          if (semanaIndex < semanasDoAno.length && !plannedEventsForAsset[semanaIndex]) {
+            plannedEventsForAsset[semanaIndex] = {
+              tipoManutencao: 'mensal',
+              descricaoSuffix: `mensal - Semana ${semanaIndex + 1}/${anoAtual}`
+            };
+          }
+        });
+      } else if (ativo.frequencia_preventiva === 'semestral') {
+        // Only add semi-annual events for assets with 'semestral' frequency
+        stdSemanasSemestrais.forEach(semanaIndex => {
+          if (semanaIndex < semanasDoAno.length) {
+            plannedEventsForAsset[semanaIndex] = {
+              tipoManutencao: 'semestral',
+              descricaoSuffix: `semestral - Semana ${semanaIndex + 1}/${anoAtual}`
+            };
+          }
+        });
+      }
+
+      // Now process all planned events for this asset, checking for existing OS
+      Object.entries(plannedEventsForAsset).forEach(([semanaIndexStr, eventInfo]) => {
+        const semanaIndex = parseInt(semanaIndexStr);
+        const semana = semanasDoAno[semanaIndex];
+        const dataPrevista = format(semana, 'yyyy-MM-dd');
+
+        // Find an existing OS for this specific active and week, matching the planned type
+        const osExistente = ordensServico.find(os =>
+          os.ativo_id === ativo.id &&
+          os.data_prevista &&
+          isSameWeek(parseISO(os.data_prevista), semana, { weekStartsOn: 0 }) &&
+          os.status !== 'cancelada' &&
+          (
+            (eventInfo.tipoManutencao === 'semestral' && os.descricao_problema?.includes('Manutenção semestral')) ||
+            (eventInfo.tipoManutencao === 'mensal' && os.descricao_problema?.includes('Manutenção mensal'))
+          )
+        );
+
+        resultado[ativo.id][semanaIndex] = {
+          semanaIndex,
+          dataPrevista,
+          osExistente,
+          ativo,
+          tipoManutencao: eventInfo.tipoManutencao,
+          descricaoSuffix: eventInfo.descricaoSuffix
+        };
+      });
+    });
+    
+    return resultado;
+  }, [ativos, ordensServico, semanasDoAno, anoAtual]);
+
+  const getStatusSemana = (ativoId, semanaIndex) => {
+    const manutencoesAtivo = manutencoesPlanejadas[ativoId];
+    if (!manutencoesAtivo || !manutencoesAtivo[semanaIndex]) return null;
+    
+    return manutencoesAtivo[semanaIndex];
+  };
+
+  const handleGerarOS = async (ativo, semanaIndex) => {
+    const semana = semanasDoAno[semanaIndex];
+    const dataPrevista = format(semana, 'yyyy-MM-dd');
+    const info = manutencoesPlanejadas[ativo.id][semanaIndex];
+    
+    const osData = {
+      numero_os: `OS-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      ativo_id: ativo.id,
+      ativo_codigo: ativo.codigo,
+      tipo_os: 'preventiva',
+      status: 'pendente',
+      prioridade: info.tipoManutencao === 'semestral' ? 'alta' : 'media',
+      data_abertura: format(new Date(), 'yyyy-MM-dd'),
+      data_prevista: dataPrevista,
+      descricao_problema: `Manutenção ${info.descricaoSuffix}`,
+      observacoes: `Planejamento Sistemático ${anoAtual} - ${ativo.localizacao_primaria}`
+    };
+
+    await createOSMutation.mutateAsync(osData);
+  };
+
+  const handleGerarOSComFiltros = async () => {
+    setGerandoOS(true);
+    const promises = [];
+    
+    Object.entries(manutencoesPlanejadas).forEach(([ativoId, semanas]) => {
+      Object.entries(semanas).forEach(([semanaIndex, info]) => {
+        const ativo = info.ativo;
+        
+        // Aplicar filtros baseados na frequencia_preventiva do ativo e setor
+        const passaFiltroFrequencia = filtroFrequencia === 'todos' || ativo.frequencia_preventiva === filtroFrequencia;
+        const passaFiltroSetor = filtroSetor === 'todos' || ativo.localizacao_primaria === filtroSetor;
+        
+        if (!info.osExistente && passaFiltroFrequencia && passaFiltroSetor) {
+          promises.push(handleGerarOS(ativo, parseInt(semanaIndex)));
+        }
+      });
+    });
+    
+    if (promises.length > 0) {
+      await Promise.all(promises);
+      alert(`✅ ${promises.length} Ordens de Serviço geradas com sucesso!`);
+    } else {
+      alert('ℹ️ Não há OSs pendentes para gerar com os filtros selecionados.');
+    }
+    
+    setGerandoOS(false);
+    setMostrarDialogGerar(false);
+  };
+
+  const estatisticas = useMemo(() => {
+    let totalPlanejadas = 0;
+    let totalGeradas = 0;
+    let porTipo = {
+      mensal: 0,
+      semestral: 0
+    };
+
+    Object.values(manutencoesPlanejadas).forEach(semanas => {
+      Object.values(semanas).forEach(({ osExistente, tipoManutencao }) => {
+        totalPlanejadas++;
+        if (osExistente) totalGeradas++;
+        if (tipoManutencao === 'mensal') porTipo.mensal++;
+        if (tipoManutencao === 'semestral') porTipo.semestral++;
+      });
+    });
+
+    return { totalPlanejadas, totalGeradas, porTipo };
+  }, [manutencoesPlanejadas]);
+
+  const contarOSPendentes = () => {
+    let count = 0;
+    Object.entries(manutencoesPlanejadas).forEach(([ativoId, semanas]) => {
+      Object.entries(semanas).forEach(([semanaIndex, info]) => {
+        const ativo = info.ativo;
+        const passaFiltroFrequencia = filtroFrequencia === 'todos' || ativo.frequencia_preventiva === filtroFrequencia;
+        const passaFiltroSetor = filtroSetor === 'todos' || ativo.localizacao_primaria === filtroSetor;
+        
+        if (!info.osExistente && passaFiltroFrequencia && passaFiltroSetor) {
+          count++;
+        }
+      });
+    });
+    return count;
+  };
+
+  return (
+    <div className="min-h-screen p-4 md:p-8">
+      <div className="max-w-[1800px] mx-auto space-y-6">
+        {/* Cabeçalho */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 className="text-4xl font-bold text-slate-900 mb-2">
+              Planejamento Sistemático Anual {anoAtual}
+            </h1>
+            <p className="text-slate-600">10 Manutenções Mensais + 2 Semestrais por equipamento</p>
+          </div>
+          <div className="flex gap-3">
+            <Select value={String(anoAtual)} onValueChange={(v) => setAnoAtual(Number(v))}>
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="2025">2025</SelectItem>
+                <SelectItem value="2026">2026</SelectItem>
+                <SelectItem value="2027">2027</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={String(numSemanasVisiveis)} onValueChange={(v) => setNumSemanasVisiveis(Number(v))}>
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="26">26 semanas (6 meses)</SelectItem>
+                <SelectItem value="30">30 semanas</SelectItem>
+                <SelectItem value="39">39 semanas (9 meses)</SelectItem>
+                <SelectItem value="52">52 semanas (ano todo)</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              onClick={() => setMostrarDialogGerar(true)}
+              className="bg-green-600 hover:bg-green-700"
+              disabled={gerandoOS || estatisticas.totalPlanejadas === 0}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Gerar OSs ({estatisticas.totalPlanejadas - estatisticas.totalGeradas})
+            </Button>
+          </div>
+        </div>
+
+        {/* KPIs */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Card className="border-none shadow-lg bg-gradient-to-br from-blue-50 to-blue-100">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-blue-600 font-medium">Planejadas</p>
+                  <p className="text-3xl font-bold text-blue-900">{estatisticas.totalPlanejadas}</p>
+                  <p className="text-xs text-blue-600 mt-1">
+                    Mensais: {estatisticas.porTipo.mensal} | 
+                    Semestrais: {estatisticas.porTipo.semestral}
+                  </p>
+                </div>
+                <Calendar className="w-12 h-12 text-blue-600 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-none shadow-lg bg-gradient-to-br from-green-50 to-green-100">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-green-600 font-medium">OSs Geradas</p>
+                  <p className="text-3xl font-bold text-green-900">{estatisticas.totalGeradas}</p>
+                  <p className="text-xs text-green-600 mt-1">
+                    {estatisticas.totalPlanejadas > 0 
+                      ? `${((estatisticas.totalGeradas / estatisticas.totalPlanejadas) * 100).toFixed(0)}% concluído`
+                      : 'Nenhuma OS planejada'
+                    }
+                  </p>
+                </div>
+                <CheckCircle className="w-12 h-12 text-green-600 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-none shadow-lg bg-gradient-to-br from-orange-50 to-orange-100">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-orange-600 font-medium">Pendentes</p>
+                  <p className="text-3xl font-bold text-orange-900">{estatisticas.totalPlanejadas - estatisticas.totalGeradas}</p>
+                  <p className="text-xs text-orange-600 mt-1">Aguardando geração</p>
+                </div>
+                <Clock className="w-12 h-12 text-orange-600 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-none shadow-lg bg-gradient-to-br from-purple-50 to-purple-100">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-purple-600 font-medium">Período</p>
+                  <p className="text-3xl font-bold text-purple-900">{numSemanasVisiveis}</p>
+                  <p className="text-xs text-purple-600 mt-1">semanas visualizadas</p>
+                </div>
+                <Filter className="w-12 h-12 text-purple-600 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Grid de Planejamento Semanal */}
+        <Card className="shadow-lg border-none">
+          <CardHeader className="border-b border-slate-200 bg-gradient-to-r from-blue-50 to-purple-50">
+            <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-900">
+              <Calendar className="w-5 h-5 text-blue-600" />
+              Grade de Manutenções Preventivas - {anoAtual}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0 overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-slate-100">
+                  <TableHead className="sticky left-0 bg-slate-100 z-20 min-w-[100px] font-bold text-slate-900">
+                    Código
+                  </TableHead>
+                  <TableHead className="sticky left-[100px] bg-slate-100 z-20 min-w-[250px] font-bold text-slate-900">
+                    Equipamento
+                  </TableHead>
+                  <TableHead className="min-w-[120px] font-bold text-slate-900">
+                    Local
+                  </TableHead>
+                  <TableHead className="min-w-[100px] font-bold text-slate-900">
+                    Frequência
+                  </TableHead>
+                  {semanasDoAno.map((semana, idx) => (
+                    <TableHead key={idx} className="text-center min-w-[50px] font-bold text-slate-900">
+                      <div className="text-xs">S{idx + 1}</div>
+                      <div className="text-[10px] text-slate-500 font-normal">
+                        {format(semana, 'dd/MM', { locale: ptBR })}
+                      </div>
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {ativos.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={semanasDoAno.length + 4} className="text-center py-8 text-slate-500">
+                      Nenhum ativo cadastrado
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  ativos
+                    .filter(a => a.frequencia_preventiva === 'mensal' || a.frequencia_preventiva === 'semestral')
+                    .map((ativo) => (
+                      <TableRow key={ativo.id} className="hover:bg-slate-50">
+                        <TableCell className="sticky left-0 bg-white z-10 font-bold text-slate-900 border-r-2">
+                          {ativo.codigo}
+                        </TableCell>
+                        <TableCell className="sticky left-[100px] bg-white z-10 border-r-2">
+                          <div>
+                            <p className="font-medium text-slate-900">{ativo.nome}</p>
+                            <p className="text-xs text-slate-500">{ativo.tipo_ativo}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <p className="text-sm text-slate-700">{ativo.localizacao_primaria}</p>
+                        </TableCell>
+                        <TableCell>
+                          <Badge className={ativo.frequencia_preventiva === 'mensal' ? 'bg-blue-500' : 'bg-purple-500'}>
+                            {ativo.frequencia_preventiva === 'mensal' ? '10M + 2S' : '2S/ano'}
+                          </Badge>
+                        </TableCell>
+                        {semanasDoAno.map((semana, idx) => {
+                          const statusSemana = getStatusSemana(ativo.id, idx);
+                          
+                          if (!statusSemana) {
+                            return (
+                              <TableCell key={idx} className="p-0 bg-gray-100">
+                                <div className="h-12"></div>
+                              </TableCell>
+                            );
+                          }
+
+                          const isSemestral = statusSemana.tipoManutencao === 'semestral';
+                          
+                          const bgColor = statusSemana.osExistente
+                            ? statusSemana.osExistente.status === 'concluida'
+                              ? isSemestral ? 'bg-green-600' : 'bg-green-500'
+                              : statusSemana.osExistente.status === 'em_andamento'
+                              ? isSemestral ? 'bg-blue-600' : 'bg-blue-500'
+                              : isSemestral ? 'bg-orange-500' : 'bg-orange-400'
+                            : isSemestral ? 'bg-yellow-500' : 'bg-yellow-400';
+
+                          const icone = statusSemana.osExistente
+                            ? statusSemana.osExistente.status === 'concluida'
+                              ? '✓'
+                              : statusSemana.osExistente.status === 'em_andamento'
+                              ? '⟳'
+                              : '○'
+                            : isSemestral ? 'S!' : 'M!';
+
+                          return (
+                            <TableCell key={idx} className="p-0">
+                              <button
+                                onClick={() => {
+                                  if (!statusSemana.osExistente) {
+                                    handleGerarOS(ativo, idx);
+                                  }
+                                }}
+                                className={`w-full h-12 ${bgColor} hover:opacity-80 text-white font-bold text-${isSemestral ? 'xl' : 'lg'} transition-all ${
+                                  !statusSemana.osExistente ? 'cursor-pointer' : 'cursor-default'
+                                }`}
+                                title={
+                                  statusSemana.osExistente
+                                    ? `OS ${statusSemana.osExistente.numero_os} - ${statusSemana.osExistente.status} (${statusSemana.tipoManutencao})`
+                                    : `Clique para Gerar OS ${statusSemana.tipoManutencao.toUpperCase()}`
+                                }
+                                disabled={createOSMutation.isPending}
+                              >
+                                {icone}
+                              </button>
+                            </TableCell>
+                          );
+                        })}
+                      </TableRow>
+                    ))
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+
+        {/* Legenda */}
+        <Card className="border-none shadow-lg">
+          <CardContent className="p-6">
+            <h3 className="font-bold text-slate-900 mb-4">Legenda:</h3>
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-green-500 rounded flex items-center justify-center text-white font-bold">✓</div>
+                <span className="text-sm font-medium text-slate-700">Concluída</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-blue-500 rounded flex items-center justify-center text-white font-bold">⟳</div>
+                <span className="text-sm font-medium text-slate-700">Em Andamento</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-orange-400 rounded flex items-center justify-center text-white font-bold">○</div>
+                <span className="text-sm font-medium text-slate-700">OS Criada</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-yellow-400 rounded flex items-center justify-center text-white font-bold">M!</div>
+                <span className="text-sm font-medium text-slate-700">Mensal Pendente</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-yellow-500 rounded flex items-center justify-center text-white font-bold">S!</div>
+                <span className="text-sm font-medium text-slate-700">Semestral Pendente</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-gray-200 rounded"></div>
+                <span className="text-sm font-medium text-slate-700">Sem Manutenção</span>
+              </div>
+            </div>
+            <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+              <p className="text-sm text-blue-900">
+                <strong>📊 Como funciona:</strong><br />
+                • <strong>Equipamentos com frequência "Mensal":</strong> 10 manutenções mensais + 2 semestrais = 12 ao ano<br />
+                • <strong>Manutenções Mensais:</strong> Semanas 4, 8, 12, 16, 20, 24, 31, 35, 39, 43 (índices 3, 7, 11, 15, 19, 23, 30, 34, 38, 42)<br />
+                • <strong>Manutenções Semestrais:</strong> Semanas 1 e 27 (índices 0 e 26) - substituem a mensal daquele mês<br />
+                • <strong>Equipamentos com frequência "Semestral":</strong> Apenas 2 manutenções ao ano (semanas 1 e 27)
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Dialog de Geração */}
+        <Dialog open={mostrarDialogGerar} onOpenChange={setMostrarDialogGerar}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-2xl font-bold">Gerar Ordens de Serviço em Lote</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-6 py-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p className="text-sm text-blue-900">
+                  <strong>Ano:</strong> {anoAtual}
+                </p>
+                <p className="text-sm text-blue-900 mt-1">
+                  <strong>Manutenções Planejadas:</strong> {estatisticas.totalPlanejadas}
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="filtro-frequencia">Filtrar por Frequência</Label>
+                  <Select value={filtroFrequencia} onValueChange={setFiltroFrequencia}>
+                    <SelectTrigger id="filtro-frequencia">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="todos">Todas as Frequências</SelectItem>
+                      <SelectItem value="mensal">Mensal (10M + 2S)</SelectItem>
+                      <SelectItem value="semestral">Semestral (2S/ano)</SelectItem>
+                      {/* Trimestral e Anual removidos pois não são mais processados por essa lógica */}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="filtro-setor">Filtrar por Setor</Label>
+                  <Select value={filtroSetor} onValueChange={setFiltroSetor}>
+                    <SelectTrigger id="filtro-setor">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="todos">Todos os Setores</SelectItem>
+                      {setoresDisponiveis.map(setor => (
+                        <SelectItem key={setor} value={setor}>{setor}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 text-green-800 mb-2">
+                  <CheckCircle className="w-5 h-5" />
+                  <p className="font-bold">Resumo da Geração</p>
+                </div>
+                <p className="text-sm text-green-700">
+                  <strong>{contarOSPendentes()}</strong> Ordens de Serviço serão geradas.
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => setMostrarDialogGerar(false)}
+                  className="flex-1"
+                  disabled={gerandoOS}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={handleGerarOSComFiltros}
+                  className="flex-1 bg-green-600 hover:bg-green-700"
+                  disabled={gerandoOS || contarOSPendentes() === 0}
+                >
+                  {gerandoOS ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Gerando...
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Gerar {contarOSPendentes()} OSs
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </div>
+  );
+}

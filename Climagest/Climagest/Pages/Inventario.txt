@@ -1,0 +1,218 @@
+import React, { useState } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { QrCode, Search, CheckCircle, MapPin, Calendar, Barcode } from "lucide-react";
+import { format } from "date-fns";
+
+export default function Inventario() {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [scannedAtivo, setScannedAtivo] = useState(null);
+  
+  const queryClient = useQueryClient();
+
+  const { data: ativos } = useQuery({
+    queryKey: ['ativos'],
+    queryFn: () => base44.entities.Ativo.list(),
+    initialData: [],
+  });
+
+  const updateAtivoMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.Ativo.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ativos'] });
+    },
+  });
+
+  const handleSearch = () => {
+    const ativo = ativos.find(a => 
+      a.codigo.toLowerCase() === searchTerm.toLowerCase() ||
+      a.id === searchTerm ||
+      a.numero_serie === searchTerm
+    );
+    
+    if (ativo) {
+      setScannedAtivo(ativo);
+      updateAtivoMutation.mutate({
+        id: ativo.id,
+        data: { ultima_verificacao: format(new Date(), 'yyyy-MM-dd') }
+      });
+    } else {
+      alert('Ativo não encontrado! Verifique o código ou número de série.');
+    }
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'operacional': return 'bg-green-100 text-green-800';
+      case 'manutencao': return 'bg-blue-100 text-blue-800';
+      case 'quebrado': return 'bg-red-100 text-red-800';
+      case 'inativo': return 'bg-gray-100 text-gray-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  return (
+    <div className="min-h-screen p-4 md:p-8">
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div>
+          <h1 className="text-4xl font-bold text-slate-900 mb-2">Inventário Rápido</h1>
+          <p className="text-slate-600">Confirme a localização e status dos ativos via código de barras ou RFID</p>
+        </div>
+
+        <Card className="shadow-lg border-none">
+          <CardHeader className="border-b border-slate-200 bg-gradient-to-r from-blue-50 to-slate-50">
+            <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-900">
+              <Barcode className="w-5 h-5 text-blue-600" />
+              Leitura de Código
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="space-y-4">
+              <div className="flex gap-3">
+                <Input
+                  placeholder="Digite ou escaneie o código / RFID / número de série..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                  className="flex-1 text-lg h-14"
+                  autoFocus
+                />
+                <Button 
+                  onClick={handleSearch}
+                  className="bg-blue-600 hover:bg-blue-700 h-14 px-8"
+                  size="lg"
+                >
+                  <Search className="w-5 h-5 mr-2" />
+                  Buscar
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="text-center p-6 bg-slate-50 rounded-lg border-2 border-dashed border-slate-300">
+                  <Barcode className="w-12 h-12 text-slate-400 mx-auto mb-2" />
+                  <p className="text-sm font-medium text-slate-600">Código de Barras</p>
+                  <p className="text-xs text-slate-500 mt-1">Use leitor USB ou digite</p>
+                </div>
+                <div className="text-center p-6 bg-slate-50 rounded-lg border-2 border-dashed border-slate-300">
+                  <QrCode className="w-12 h-12 text-slate-400 mx-auto mb-2" />
+                  <p className="text-sm font-medium text-slate-600">RFID / NFC</p>
+                  <p className="text-xs text-slate-500 mt-1">Aproxime o tag do leitor</p>
+                </div>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p className="text-sm text-blue-800">
+                  💡 <strong>Dica:</strong> Use um leitor de código de barras USB ou leitor RFID. 
+                  O código será inserido automaticamente no campo acima.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {scannedAtivo && (
+          <Card className="shadow-lg border-none animate-in slide-in-from-bottom">
+            <CardHeader className="border-b border-slate-200 bg-gradient-to-r from-green-50 to-blue-50">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-900">
+                  <CheckCircle className="w-5 h-5 text-green-600" />
+                  Ativo Encontrado
+                </CardTitle>
+                <Badge className={getStatusColor(scannedAtivo.status_operacional)}>
+                  {scannedAtivo.status_operacional}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="p-6">
+              <div className="space-y-6">
+                <div className="grid md:grid-cols-2 gap-6">
+                  <div>
+                    <p className="text-sm text-slate-500 mb-1">Código</p>
+                    <p className="text-lg font-bold text-slate-900">{scannedAtivo.codigo}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-slate-500 mb-1">Nome</p>
+                    <p className="text-lg font-medium text-slate-900">{scannedAtivo.nome}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-slate-500 mb-1">Tipo</p>
+                    <p className="font-medium text-slate-700">{scannedAtivo.tipo_ativo}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-slate-500 mb-1">Número de Série</p>
+                    <p className="font-medium text-slate-700">{scannedAtivo.numero_serie || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-slate-500 mb-1">Fabricante</p>
+                    <p className="font-medium text-slate-700">{scannedAtivo.fabricante || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-slate-500 mb-1">Modelo</p>
+                    <p className="font-medium text-slate-700">{scannedAtivo.modelo || '-'}</p>
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-200 pt-6">
+                  <div className="flex items-start gap-3 mb-4">
+                    <MapPin className="w-5 h-5 text-blue-600 mt-1" />
+                    <div>
+                      <p className="text-sm text-slate-500">Localização</p>
+                      <p className="font-semibold text-slate-900">{scannedAtivo.localizacao_primaria}</p>
+                      {scannedAtivo.sub_localizacao && (
+                        <p className="text-sm text-slate-600">{scannedAtivo.sub_localizacao}</p>
+                      )}
+                      {scannedAtivo.ponto_wifi && (
+                        <p className="text-sm text-slate-500 mt-1">
+                          📡 Wi-Fi: {scannedAtivo.ponto_wifi}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {scannedAtivo.proxima_manutencao && (
+                  <div className="border-t border-slate-200 pt-6">
+                    <div className="flex items-center gap-3">
+                      <Calendar className="w-5 h-5 text-orange-600" />
+                      <div>
+                        <p className="text-sm text-slate-500">Próxima Manutenção</p>
+                        <p className="font-semibold text-slate-900">
+                          {format(new Date(scannedAtivo.proxima_manutencao), 'dd/MM/yyyy')}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 text-green-800">
+                    <CheckCircle className="w-5 h-5" />
+                    <p className="font-medium">Inventário confirmado com sucesso!</p>
+                  </div>
+                  <p className="text-sm text-green-700 mt-1">
+                    Ativo verificado em {format(new Date(), 'dd/MM/yyyy HH:mm')}
+                  </p>
+                </div>
+
+                <Button
+                  onClick={() => {
+                    setScannedAtivo(null);
+                    setSearchTerm('');
+                  }}
+                  variant="outline"
+                  className="w-full"
+                >
+                  Escanear Próximo Ativo
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}

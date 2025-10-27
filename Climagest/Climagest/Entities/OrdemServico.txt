@@ -1,0 +1,110 @@
+{
+  "name": "OrdemServico",
+  "type": "object",
+  "properties": {
+    "numero_os": {
+      "type": "string",
+      "description": "Número único da OS"
+    },
+    "ativo_id": {
+      "type": "string",
+      "description": "ID do ativo relacionado"
+    },
+    "ativo_codigo": {
+      "type": "string",
+      "description": "Código do ativo para referência rápida"
+    },
+    "tipo_os": {
+      "type": "string",
+      "enum": [
+        "preventiva",
+        "corretiva"
+      ],
+      "description": "Tipo da ordem de serviço"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pendente",
+        "em_andamento",
+        "concluida",
+        "cancelada"
+      ],
+      "default": "pendente"
+    },
+    "prioridade": {
+      "type": "string",
+      "enum": [
+        "baixa",
+        "media",
+        "alta",
+        "urgente"
+      ],
+      "default": "media"
+    },
+    "data_abertura": {
+      "type": "string",
+      "format": "date"
+    },
+    "data_prevista": {
+      "type": "string",
+      "format": "date"
+    },
+    "data_conclusao": {
+      "type": "string",
+      "format": "date"
+    },
+    "tecnico_responsavel": {
+      "type": "string",
+      "description": "Email do técnico atribuído"
+    },
+    "descricao_problema": {
+      "type": "string",
+      "description": "Descrição do problema (para corretivas)"
+    },
+    "descricao_servico_realizado": {
+      "type": "string",
+      "description": "Descrição do serviço executado"
+    },
+    "horas_gastas": {
+      "type": "number",
+      "description": "Horas gastas no serviço"
+    },
+    "custo_pecas": {
+      "type": "number",
+      "description": "Custo de peças em R$",
+      "default": 0
+    },
+    "custo_mao_obra_externa": {
+      "type": "number",
+      "description": "Custo de mão de obra externa em R$",
+      "default": 0
+    },
+    "custo_total": {
+      "type": "number",
+      "description": "Custo total da OS"
+    },
+    "fotos_antes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "URLs das fotos antes do serviço"
+    },
+    "fotos_depois": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "URLs das fotos depois do serviço"
+    },
+    "observacoes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "numero_os",
+    "ativo_id",
+    "tipo_os"
+  ]
+}

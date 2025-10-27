@@ -1,0 +1,546 @@
+
+import React, { useState, useMemo } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label"; // Added this import
+import { Calendar, CheckCircle, Clock, MapPin, Download, Plus, Filter } from "lucide-react";
+import { format, addMonths, startOfMonth, endOfMonth, eachMonthOfInterval, isSameMonth, parseISO, getMonth, getYear, setYear } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+export default function PlanoSistematico2026() {
+  const [anoSelecionado, setAnoSelecionado] = useState(2026);
+  const [localSelecionado, setLocalSelecionado] = useState('todos');
+  
+  const queryClient = useQueryClient();
+
+  const { data: ativos } = useQuery({
+    queryKey: ['ativos'],
+    queryFn: () => base44.entities.Ativo.list(),
+    initialData: [],
+  });
+
+  const { data: ordensServico } = useQuery({
+    queryKey: ['ordensServico'],
+    queryFn: () => base44.entities.OrdemServico.list(),
+    initialData: [],
+  });
+
+  const { data: checklistRespostas } = useQuery({
+    queryKey: ['checklistRespostas'],
+    queryFn: () => base44.entities.ChecklistResposta.list(),
+    initialData: [],
+  });
+
+  const createOSMutation = useMutation({
+    mutationFn: (osData) => base44.entities.OrdemServico.create(osData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ordensServico'] });
+    },
+  });
+
+  // Meses do ano
+  const mesesDoAno = eachMonthOfInterval({
+    start: new Date(anoSelecionado, 0, 1),
+    end: new Date(anoSelecionado, 11, 31)
+  });
+
+  // Agrupar ativos por localização
+  const ativosPorLocal = useMemo(() => {
+    const grupos = {};
+    
+    ativos
+      .filter(a => a.frequencia_preventiva) // Apenas ativos com manutenção programada
+      .forEach(ativo => {
+        const local = ativo.localizacao_primaria || 'Sem Localização';
+        if (!grupos[local]) {
+          grupos[local] = [];
+        }
+        grupos[local].push(ativo);
+      });
+    
+    return grupos;
+  }, [ativos]);
+
+  // Obter locais disponíveis
+  const locaisDisponiveis = Object.keys(ativosPorLocal).sort();
+
+  // Filtrar por local se selecionado
+  const locaisFiltrados = localSelecionado === 'todos' 
+    ? locaisDisponiveis 
+    : [localSelecionado];
+
+  // Verificar status de manutenção por mês
+  const getStatusMes = (ativo, mes) => {
+    const mesNum = getMonth(mes);
+    const anoNum = getYear(mes);
+    
+    // Verificar se precisa manutenção neste mês
+    let precisaManutencao = false;
+    
+    switch (ativo.frequencia_preventiva) {
+      case 'mensal':
+        precisaManutencao = true; // Todo mês
+        break;
+      case 'trimestral':
+        precisaManutencao = mesNum % 3 === 0; // Jan, Abr, Jul, Out
+        break;
+      case 'semestral':
+        precisaManutencao = mesNum === 0 || mesNum === 6; // Jan, Jul
+        break;
+      case 'anual':
+        precisaManutencao = mesNum === 0; // Janeiro
+        break;
+    }
+    
+    if (!precisaManutencao) return 'nao_aplicavel';
+    
+    // Verificar se existe OS para este mês
+    const osDoMes = ordensServico.find(os => 
+      os.ativo_id === ativo.id &&
+      os.data_prevista &&
+      isSameMonth(parseISO(os.data_prevista), mes) &&
+      os.status !== 'cancelada'
+    );
+    
+    if (!osDoMes) return 'pendente'; // Amarelo - precisa gerar OS
+    
+    // Verificar se tem checklist executado
+    const checklistExecutado = checklistRespostas.find(c =>
+      c.ativo_id === ativo.id &&
+      c.data_execucao &&
+      isSameMonth(parseISO(c.data_execucao), mes)
+    );
+    
+    if (osDoMes.status === 'concluida' && checklistExecutado) {
+      return 'concluida'; // Verde - manutenção realizada
+    }
+    
+    if (osDoMes.status === 'em_andamento') {
+      return 'em_andamento'; // Azul - em execução
+    }
+    
+    return 'agendada'; // Laranja - OS criada mas não executada
+  };
+
+  const getCoresCelula = (status) => {
+    switch (status) {
+      case 'concluida':
+        return 'bg-green-500 hover:bg-green-600';
+      case 'em_andamento':
+        return 'bg-blue-500 hover:bg-blue-600';
+      case 'agendada':
+        return 'bg-orange-400 hover:bg-orange-500';
+      case 'pendente':
+        return 'bg-yellow-400 hover:bg-yellow-500';
+      case 'nao_aplicavel':
+        return 'bg-gray-200';
+      default:
+        return 'bg-white border border-slate-300';
+    }
+  };
+
+  const getIconeCelula = (status) => {
+    switch (status) {
+      case 'concluida':
+        return '✓';
+      case 'em_andamento':
+        return '⟳';
+      case 'agendada':
+        return '○';
+      case 'pendente':
+        return '!';
+      case 'nao_aplicavel':
+        return '-';
+      default:
+        return '';
+    }
+  };
+
+  const handleGerarOSMes = async (ativo, mes) => {
+    const dataPrevista = format(startOfMonth(mes), 'yyyy-MM-dd');
+    
+    const osData = {
+      numero_os: `OS-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      ativo_id: ativo.id,
+      ativo_codigo: ativo.codigo,
+      tipo_os: 'preventiva',
+      status: 'pendente',
+      prioridade: 'media',
+      data_abertura: format(new Date(), 'yyyy-MM-dd'),
+      data_prevista: dataPrevista,
+      descricao_problema: `Manutenção preventiva ${ativo.frequencia_preventiva} - ${format(mes, 'MMMM/yyyy', { locale: ptBR })}`,
+      observacoes: `Plano Sistemático 2026 - ${ativo.localizacao_primaria}`
+    };
+
+    await createOSMutation.mutateAsync(osData);
+  };
+
+  const handleGerarOSLocal = async (local, mes) => {
+    const ativos = ativosPorLocal[local];
+    const promises = [];
+    
+    ativos.forEach(ativo => {
+      const status = getStatusMes(ativo, mes);
+      if (status === 'pendente') {
+        promises.push(handleGerarOSMes(ativo, mes));
+      }
+    });
+    
+    if (promises.length > 0) {
+      await Promise.all(promises);
+      alert(`✅ ${promises.length} OSs geradas para ${local} em ${format(mes, 'MMMM/yyyy', { locale: ptBR })}`);
+    } else {
+      alert('ℹ️ Todas as OSs já foram geradas para este local/mês.');
+    }
+  };
+
+  const handleExportarExcel = () => {
+    // Preparar dados para exportação
+    const dados = [];
+    
+    locaisFiltrados.forEach(local => {
+      ativosPorLocal[local].forEach(ativo => {
+        const linha = {
+          'Local': local,
+          'Código': ativo.codigo,
+          'Equipamento': ativo.nome,
+          'Tipo': ativo.tipo_ativo,
+          'Frequência': ativo.frequencia_preventiva,
+          'Fabricante': ativo.fabricante || '-',
+          'Modelo': ativo.modelo || '-'
+        };
+        
+        // Adicionar colunas de cada mês
+        mesesDoAno.forEach(mes => {
+          const mesNome = format(mes, 'MMM/yy', { locale: ptBR });
+          const status = getStatusMes(ativo, mes);
+          linha[mesNome] = status === 'concluida' ? 'OK' : 
+                          status === 'pendente' ? 'PENDENTE' :
+                          status === 'agendada' ? 'AGENDADA' :
+                          status === 'em_andamento' ? 'EM EXECUÇÃO' : '-';
+        });
+        
+        dados.push(linha);
+      });
+    });
+    
+    // Converter para CSV
+    const headers = Object.keys(dados[0]);
+    const csvContent = [
+      headers.join(','),
+      ...dados.map(row => headers.map(h => JSON.stringify(row[h] || '')).join(','))
+    ].join('\n');
+    
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `Plano_Sistematico_${anoSelecionado}_${localSelecionado}.csv`;
+    link.click();
+  };
+
+  // Estatísticas
+  const estatisticas = useMemo(() => {
+    let totalEquipamentos = 0;
+    let totalManutencoes = 0;
+    let concluidas = 0;
+    let pendentes = 0;
+    
+    locaisFiltrados.forEach(local => {
+      totalEquipamentos += ativosPorLocal[local].length;
+      
+      ativosPorLocal[local].forEach(ativo => {
+        mesesDoAno.forEach(mes => {
+          const status = getStatusMes(ativo, mes);
+          if (status !== 'nao_aplicavel') {
+            totalManutencoes++;
+            if (status === 'concluida') concluidas++;
+            if (status === 'pendente') pendentes++;
+          }
+        });
+      });
+    });
+    
+    return {
+      totalEquipamentos,
+      totalManutencoes,
+      concluidas,
+      pendentes,
+      percentualConcluido: totalManutencoes > 0 ? ((concluidas / totalManutencoes) * 100).toFixed(1) : 0
+    };
+  }, [locaisFiltrados, ativosPorLocal, mesesDoAno, ordensServico, checklistRespostas]);
+
+  return (
+    <div className="min-h-screen p-4 md:p-8 bg-slate-50">
+      <div className="max-w-[1800px] mx-auto space-y-6">
+        {/* Cabeçalho */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 className="text-4xl font-bold text-slate-900 mb-2">
+              Plano Sistemático de Manutenção {anoSelecionado}
+            </h1>
+            <p className="text-slate-600">Agrupado por localização - Controle mensal de manutenções preventivas</p>
+          </div>
+          <div className="flex gap-3">
+            <Select value={String(anoSelecionado)} onValueChange={(v) => setAnoSelecionado(Number(v))}>
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="2025">2025</SelectItem>
+                <SelectItem value="2026">2026</SelectItem>
+                <SelectItem value="2027">2027</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button onClick={handleExportarExcel} variant="outline">
+              <Download className="w-4 h-4 mr-2" />
+              Exportar Excel
+            </Button>
+          </div>
+        </div>
+
+        {/* KPIs */}
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <Card className="border-none shadow-lg bg-gradient-to-br from-blue-50 to-blue-100">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-blue-600 font-medium">Equipamentos</p>
+                  <p className="text-3xl font-bold text-blue-900">{estatisticas.totalEquipamentos}</p>
+                </div>
+                <MapPin className="w-10 h-10 text-blue-600 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-none shadow-lg bg-gradient-to-br from-purple-50 to-purple-100">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-purple-600 font-medium">Total Manutenções</p>
+                  <p className="text-3xl font-bold text-purple-900">{estatisticas.totalManutencoes}</p>
+                </div>
+                <Calendar className="w-10 h-10 text-purple-600 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-none shadow-lg bg-gradient-to-br from-green-50 to-green-100">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-green-600 font-medium">Concluídas</p>
+                  <p className="text-3xl font-bold text-green-900">{estatisticas.concluidas}</p>
+                </div>
+                <CheckCircle className="w-10 h-10 text-green-600 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-none shadow-lg bg-gradient-to-br from-yellow-50 to-yellow-100">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-yellow-600 font-medium">Pendentes</p>
+                  <p className="text-3xl font-bold text-yellow-900">{estatisticas.pendentes}</p>
+                </div>
+                <Clock className="w-10 h-10 text-yellow-600 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-none shadow-lg bg-gradient-to-br from-indigo-50 to-indigo-100">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-indigo-600 font-medium">Progresso</p>
+                  <p className="text-3xl font-bold text-indigo-900">{estatisticas.percentualConcluido}%</p>
+                </div>
+                <div className="text-2xl">📊</div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Filtro por Local */}
+        <Card className="border-none shadow-lg">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-4">
+              <Filter className="w-5 h-5 text-slate-600" />
+              <Label className="font-medium text-slate-700">Filtrar por Local:</Label>
+              <Select value={localSelecionado} onValueChange={setLocalSelecionado}>
+                <SelectTrigger className="w-64">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">📍 Todos os Locais</SelectItem>
+                  {locaisDisponiveis.map(local => (
+                    <SelectItem key={local} value={local}>
+                      📍 {local} ({ativosPorLocal[local].length} equip.)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Grid de Manutenções por Local */}
+        {locaisFiltrados.map(local => (
+          <Card key={local} className="shadow-lg border-none">
+            <CardHeader className="border-b border-slate-200 bg-gradient-to-r from-blue-50 to-purple-50">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-900">
+                  <MapPin className="w-5 h-5 text-blue-600" />
+                  {local}
+                  <Badge variant="outline" className="ml-2">
+                    {ativosPorLocal[local].length} equipamentos
+                  </Badge>
+                </CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0 overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-slate-100">
+                    <TableHead className="sticky left-0 bg-slate-100 z-20 min-w-[80px] font-bold text-slate-900">
+                      Código
+                    </TableHead>
+                    <TableHead className="sticky left-[80px] bg-slate-100 z-20 min-w-[200px] font-bold text-slate-900">
+                      Equipamento
+                    </TableHead>
+                    <TableHead className="min-w-[100px] font-bold text-slate-900">
+                      Tipo
+                    </TableHead>
+                    <TableHead className="min-w-[100px] font-bold text-slate-900">
+                      Frequência
+                    </TableHead>
+                    {mesesDoAno.map((mes, idx) => (
+                      <TableHead key={idx} className="text-center min-w-[60px] font-bold text-slate-900">
+                        <div>{format(mes, 'MMM', { locale: ptBR })}</div>
+                        <div className="text-xs font-normal text-slate-500">{format(mes, 'yy')}</div>
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {ativosPorLocal[local].map((ativo) => (
+                    <TableRow key={ativo.id} className="hover:bg-slate-50">
+                      <TableCell className="sticky left-0 bg-white z-10 font-bold text-slate-900 border-r-2">
+                        {ativo.codigo}
+                      </TableCell>
+                      <TableCell className="sticky left-[80px] bg-white z-10 border-r-2">
+                        <div>
+                          <p className="font-medium text-slate-900">{ativo.nome}</p>
+                          <p className="text-xs text-slate-500">
+                            {ativo.fabricante} {ativo.modelo && `- ${ativo.modelo}`}
+                          </p>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs">
+                          {ativo.tipo_ativo}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className="bg-blue-500 text-xs">
+                          {ativo.frequencia_preventiva}
+                        </Badge>
+                      </TableCell>
+                      {mesesDoAno.map((mes, idx) => {
+                        const status = getStatusMes(ativo, mes);
+                        const cores = getCoresCelula(status);
+                        const icone = getIconeCelula(status);
+                        
+                        return (
+                          <TableCell
+                            key={idx}
+                            className={`text-center p-0`}
+                          >
+                            <button
+                              onClick={() => {
+                                if (status === 'pendente') {
+                                  handleGerarOSMes(ativo, mes);
+                                }
+                              }}
+                              className={`w-full h-full py-3 px-2 ${cores} text-white font-bold text-lg transition-all ${
+                                status === 'pendente' ? 'cursor-pointer' : 'cursor-default'
+                              }`}
+                              title={
+                                status === 'concluida' ? 'Manutenção Concluída' :
+                                status === 'em_andamento' ? 'Em Andamento' :
+                                status === 'agendada' ? 'OS Criada - Aguardando Execução' :
+                                status === 'pendente' ? 'Clique para Gerar OS' :
+                                'Não aplicável neste mês'
+                              }
+                              disabled={createOSMutation.isPending}
+                            >
+                              {icone}
+                            </button>
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  ))}
+                  
+                  {/* Linha de ações do local */}
+                  <TableRow className="bg-slate-50 border-t-2 border-slate-300">
+                    <TableCell colSpan={4} className="sticky left-0 bg-slate-50 z-10 font-bold text-slate-700">
+                      Ações em Lote - {local}
+                    </TableCell>
+                    {mesesDoAno.map((mes, idx) => (
+                      <TableCell key={idx} className="text-center p-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleGerarOSLocal(local, mes)}
+                          className="w-full h-8 text-xs"
+                          disabled={createOSMutation.isPending}
+                        >
+                          <Plus className="w-3 h-3" />
+                        </Button>
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        ))}
+
+        {/* Legenda */}
+        <Card className="border-none shadow-lg">
+          <CardContent className="p-6">
+            <h3 className="font-bold text-slate-900 mb-4">Legenda:</h3>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-green-500 rounded flex items-center justify-center text-white font-bold">✓</div>
+                <span className="text-sm font-medium text-slate-700">Concluída</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-blue-500 rounded flex items-center justify-center text-white font-bold">⟳</div>
+                <span className="text-sm font-medium text-slate-700">Em Andamento</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-orange-400 rounded flex items-center justify-center text-white font-bold">○</div>
+                <span className="text-sm font-medium text-slate-700">OS Criada</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-yellow-400 rounded flex items-center justify-center text-white font-bold">!</div>
+                <span className="text-sm font-medium text-slate-700">Pendente (Clique p/ Gerar)</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-gray-200 rounded flex items-center justify-center text-slate-600 font-bold">-</div>
+                <span className="text-sm font-medium text-slate-700">Não Aplicável</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}

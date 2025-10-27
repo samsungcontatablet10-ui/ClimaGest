@@ -1,0 +1,116 @@
+import React, { useRef, useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { X, Check } from "lucide-react";
+
+export default function AssinaturaDigital({ onSalvar, onCancelar }) {
+  const canvasRef = useRef(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [nomeTecnico, setNomeTecnico] = useState('');
+
+  const startDrawing = (e) => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    ctx.beginPath();
+    const rect = canvas.getBoundingClientRect();
+    ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+    setIsDrawing(true);
+  };
+
+  const draw = (e) => {
+    if (!isDrawing) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.getBoundingClientRect();
+    ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+    ctx.stroke();
+  };
+
+  const stopDrawing = () => {
+    setIsDrawing(false);
+  };
+
+  const limparAssinatura = () => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  };
+
+  const handleSalvar = () => {
+    const canvas = canvasRef.current;
+    const assinaturaImagem = canvas.toDataURL();
+    
+    onSalvar({
+      assinatura_imagem: assinaturaImagem,
+      nome_tecnico: nomeTecnico,
+      data_hora: new Date().toISOString()
+    });
+  };
+
+  return (
+    <Card className="border-none shadow-2xl">
+      <CardHeader className="bg-gradient-to-r from-blue-600 to-blue-700 text-white">
+        <CardTitle className="text-2xl font-bold">Assinatura Digital</CardTitle>
+        <p className="text-blue-100 text-sm">Assine abaixo para confirmar a execução do serviço</p>
+      </CardHeader>
+      <CardContent className="p-6 space-y-6">
+        <div className="space-y-2">
+          <Label htmlFor="nome-tecnico" className="text-base font-semibold">Nome do Técnico</Label>
+          <Input
+            id="nome-tecnico"
+            placeholder="Digite seu nome completo"
+            value={nomeTecnico}
+            onChange={(e) => setNomeTecnico(e.target.value)}
+            className="h-12 text-lg"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-base font-semibold">Assinatura</Label>
+          <div className="border-2 border-dashed border-slate-300 rounded-lg overflow-hidden bg-white">
+            <canvas
+              ref={canvasRef}
+              width={600}
+              height={200}
+              onMouseDown={startDrawing}
+              onMouseMove={draw}
+              onMouseUp={stopDrawing}
+              onMouseLeave={stopDrawing}
+              className="w-full cursor-crosshair"
+              style={{ touchAction: 'none' }}
+            />
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={limparAssinatura}
+            className="w-full"
+          >
+            <X className="w-4 h-4 mr-2" />
+            Limpar Assinatura
+          </Button>
+        </div>
+
+        <div className="flex gap-3 pt-4">
+          <Button
+            variant="outline"
+            onClick={onCancelar}
+            className="flex-1 h-12"
+          >
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleSalvar}
+            disabled={!nomeTecnico.trim()}
+            className="flex-1 h-12 bg-green-600 hover:bg-green-700 text-lg font-bold"
+          >
+            <Check className="w-5 h-5 mr-2" />
+            Confirmar e Salvar
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}

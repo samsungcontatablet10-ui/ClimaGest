@@ -1,0 +1,154 @@
+import React, { useState } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Plus, Download } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+
+import FormularioCadastro from "../components/ativos/FormularioCadastro";
+import ListaAtivos from "../components/ativos/ListaAtivos";
+
+export default function Ativos() {
+  const [showForm, setShowForm] = useState(false);
+  const [editingAtivo, setEditingAtivo] = useState(null);
+  const [qrDialogAtivo, setQrDialogAtivo] = useState(null);
+  
+  const queryClient = useQueryClient();
+
+  const { data: ativos, isLoading } = useQuery({
+    queryKey: ['ativos'],
+    queryFn: () => base44.entities.Ativo.list('-created_date'),
+    initialData: [],
+  });
+
+  const createAtivoMutation = useMutation({
+    mutationFn: (ativoData) => base44.entities.Ativo.create(ativoData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ativos'] });
+      setShowForm(false);
+      setEditingAtivo(null);
+    },
+  });
+
+  const updateAtivoMutation = useMutation({
+    mutationFn: ({ id, ativoData }) => base44.entities.Ativo.update(id, ativoData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ativos'] });
+      setShowForm(false);
+      setEditingAtivo(null);
+    },
+  });
+
+  const handleSubmit = async (ativoData) => {
+    if (editingAtivo) {
+      updateAtivoMutation.mutate({ id: editingAtivo.id, ativoData });
+    } else {
+      createAtivoMutation.mutate(ativoData);
+    }
+  };
+
+  const handleEdit = (ativo) => {
+    setEditingAtivo(ativo);
+    setShowForm(true);
+  };
+
+  const handleExport = () => {
+    const csvData = ativos.map(a => ({
+      Código: a.codigo,
+      Nome: a.nome,
+      Tipo: a.tipo_ativo,
+      Localização: a.localizacao_primaria,
+      Status: a.status_operacional,
+      'Próxima Manutenção': a.proxima_manutencao || '-'
+    }));
+
+    const headers = Object.keys(csvData[0]);
+    const csvContent = [
+      headers.join(','),
+      ...csvData.map(row => headers.map(h => JSON.stringify(row[h] || '')).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'ativos.csv';
+    link.click();
+  };
+
+  return (
+    <div className="min-h-screen p-4 md:p-8">
+      <div className="max-w-7xl mx-auto space-y-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 className="text-4xl font-bold text-slate-900 mb-2">Gestão de Ativos</h1>
+            <p className="text-slate-600">Cadastro e controle de equipamentos de climatização</p>
+          </div>
+          <div className="flex gap-3">
+            <Button
+              variant="outline"
+              onClick={handleExport}
+              disabled={ativos.length === 0}
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Exportar
+            </Button>
+            <Button 
+              onClick={() => setShowForm(!showForm)}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Novo Ativo
+            </Button>
+          </div>
+        </div>
+
+        {showForm && (
+          <FormularioCadastro
+            ativo={editingAtivo}
+            onSave={handleSubmit}
+            onCancel={() => {
+              setShowForm(false);
+              setEditingAtivo(null);
+            }}
+            isProcessing={createAtivoMutation.isPending || updateAtivoMutation.isPending}
+          />
+        )}
+
+        <ListaAtivos
+          ativos={ativos}
+          isLoading={isLoading}
+          onEdit={handleEdit}
+          onViewQR={setQrDialogAtivo}
+        />
+
+        <Dialog open={!!qrDialogAtivo} onOpenChange={() => setQrDialogAtivo(null)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>QR Code - {qrDialogAtivo?.codigo}</DialogTitle>
+            </DialogHeader>
+            <div className="flex flex-col items-center gap-4 py-4">
+              {qrDialogAtivo && (
+                <>
+                  <div className="bg-white p-4 rounded-lg border-2 border-slate-200">
+                    <img 
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrDialogAtivo.id)}`}
+                      alt={`QR Code ${qrDialogAtivo.codigo}`}
+                      width={200}
+                      height={200}
+                    />
+                  </div>
+                  <p className="text-sm text-slate-600 text-center">
+                    {qrDialogAtivo.nome}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Escaneie este código para acesso rápido ao ativo
+                  </p>
+                </>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,45 @@
+{
+  "name": "Notificacao",
+  "type": "object",
+  "properties": {
+    "tipo": {
+      "type": "string",
+      "enum": [
+        "os_vencendo",
+        "os_atrasada",
+        "equipamento_critico",
+        "estoque_baixo",
+        "os_concluida"
+      ],
+      "description": "Tipo de notificação"
+    },
+    "titulo": {
+      "type": "string"
+    },
+    "mensagem": {
+      "type": "string"
+    },
+    "destinatario_email": {
+      "type": "string",
+      "description": "Email do destinatário"
+    },
+    "lida": {
+      "type": "boolean",
+      "default": false
+    },
+    "link": {
+      "type": "string",
+      "description": "Link para a página relacionada"
+    },
+    "data_envio": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "tipo",
+    "titulo",
+    "mensagem",
+    "destinatario_email"
+  ]
+}

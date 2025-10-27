@@ -1,0 +1,150 @@
+import React, { useState, useRef } from 'react';
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Camera, Search, QrCode } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+
+export default function ScannerQR({ onScanSuccess, ativos }) {
+  const [codigoManual, setCodigoManual] = useState('');
+  const [showCamera, setShowCamera] = useState(false);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+
+  const handleBuscarManual = () => {
+    if (codigoManual.trim()) {
+      onScanSuccess(codigoManual.trim());
+      setCodigoManual('');
+    }
+  };
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'environment' },
+        audio: false 
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      console.error("Erro ao acessar câmera:", err);
+      alert("Não foi possível acessar a câmera. Por favor, use a busca manual.");
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+  };
+
+  const handleOpenCamera = () => {
+    setShowCamera(true);
+    setTimeout(startCamera, 100);
+  };
+
+  const handleCloseCamera = () => {
+    stopCamera();
+    setShowCamera(false);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Busca Manual */}
+      <div className="space-y-3">
+        <label className="text-sm font-medium text-slate-700">
+          Digite o código do ativo
+        </label>
+        <div className="flex gap-2">
+          <Input
+            placeholder="Ex: AC-001"
+            value={codigoManual}
+            onChange={(e) => setCodigoManual(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && handleBuscarManual()}
+            className="text-lg"
+          />
+          <Button 
+            onClick={handleBuscarManual}
+            className="bg-blue-600 hover:bg-blue-700"
+          >
+            <Search className="w-5 h-5" />
+          </Button>
+        </div>
+      </div>
+
+      <div className="relative">
+        <div className="absolute inset-0 flex items-center">
+          <div className="w-full border-t border-slate-300"></div>
+        </div>
+        <div className="relative flex justify-center text-sm">
+          <span className="px-2 bg-white text-slate-500">ou</span>
+        </div>
+      </div>
+
+      {/* Botão Câmera */}
+      <Button
+        onClick={handleOpenCamera}
+        className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 py-6 text-lg"
+        size="lg"
+      >
+        <Camera className="w-6 h-6 mr-3" />
+        Escanear QR Code com Câmera
+      </Button>
+
+      {/* Lista de Ativos Recentes */}
+      {ativos.length > 0 && (
+        <div className="mt-6 pt-6 border-t">
+          <p className="text-sm font-medium text-slate-700 mb-3">Acesso Rápido</p>
+          <div className="space-y-2 max-h-48 overflow-y-auto">
+            {ativos.slice(0, 5).map(ativo => (
+              <Button
+                key={ativo.id}
+                variant="outline"
+                onClick={() => onScanSuccess(ativo.id)}
+                className="w-full justify-start text-left"
+              >
+                <QrCode className="w-4 h-4 mr-2 text-blue-600" />
+                <div>
+                  <p className="font-medium">{ativo.codigo}</p>
+                  <p className="text-xs text-slate-500">{ativo.nome}</p>
+                </div>
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Dialog Câmera */}
+      <Dialog open={showCamera} onOpenChange={handleCloseCamera}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Escanear QR Code</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="relative aspect-square bg-black rounded-lg overflow-hidden">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="absolute inset-0 w-full h-full object-cover"
+              />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="w-64 h-64 border-4 border-white rounded-2xl"></div>
+              </div>
+            </div>
+            <p className="text-sm text-center text-slate-600">
+              Posicione o QR Code dentro do quadrado
+            </p>
+            <p className="text-xs text-center text-slate-500">
+              Nota: Para scanner QR real, seria necessário integração com biblioteca de leitura de QR Code.
+              Por enquanto, use a busca manual.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

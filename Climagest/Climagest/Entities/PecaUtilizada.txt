@@ -1,0 +1,38 @@
+{
+  "name": "PecaUtilizada",
+  "type": "object",
+  "properties": {
+    "ordem_servico_id": {
+      "type": "string",
+      "description": "ID da OS onde a peça foi utilizada"
+    },
+    "peca_id": {
+      "type": "string",
+      "description": "ID da peça"
+    },
+    "peca_codigo": {
+      "type": "string",
+      "description": "Código da peça para referência"
+    },
+    "peca_nome": {
+      "type": "string"
+    },
+    "quantidade": {
+      "type": "number",
+      "description": "Quantidade utilizada"
+    },
+    "preco_unitario": {
+      "type": "number",
+      "description": "Preço no momento da utilização"
+    },
+    "custo_total": {
+      "type": "number",
+      "description": "Quantidade * Preço Unitário"
+    }
+  },
+  "required": [
+    "ordem_servico_id",
+    "peca_id",
+    "quantidade"
+  ]
+}

@@ -1,0 +1,136 @@
+import React from 'react';
+import { Button } from "@/components/ui/button";
+import { FileDown, Loader2 } from "lucide-react";
+
+export default function ExportarPDF({ dados, tipo, isLoading = false }) {
+  const handleExportar = async () => {
+    // Criar HTML para o PDF
+    let htmlContent = '';
+
+    if (tipo === 'desempenho-tecnicos') {
+      htmlContent = `
+        <html>
+          <head>
+            <style>
+              body { font-family: Arial, sans-serif; padding: 40px; }
+              h1 { color: #1e40af; border-bottom: 3px solid #1e40af; padding-bottom: 10px; }
+              table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+              th, td { border: 1px solid #e2e8f0; padding: 12px; text-align: left; }
+              th { background-color: #f1f5f9; font-weight: bold; }
+              .destaque { background-color: #fef3c7; }
+            </style>
+          </head>
+          <body>
+            <h1>Relatório de Desempenho dos Técnicos</h1>
+            <p><strong>Data:</strong> ${new Date().toLocaleDateString('pt-BR')}</p>
+            
+            <table>
+              <thead>
+                <tr>
+                  <th>Técnico</th>
+                  <th>OS Concluídas</th>
+                  <th>Preventivas</th>
+                  <th>Corretivas</th>
+                  <th>Horas Totais</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${dados.map((t, idx) => `
+                  <tr class="${idx < 3 ? 'destaque' : ''}">
+                    <td>${t.nome}</td>
+                    <td>${t.os_concluidas}</td>
+                    <td>${t.os_preventivas}</td>
+                    <td>${t.os_corretivas}</td>
+                    <td>${t.horas_totais.toFixed(1)}h</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </body>
+        </html>
+      `;
+    } else if (tipo === 'financeiro') {
+      htmlContent = `
+        <html>
+          <head>
+            <style>
+              body { font-family: Arial, sans-serif; padding: 40px; }
+              h1 { color: #1e40af; border-bottom: 3px solid #1e40af; padding-bottom: 10px; }
+              .info { background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0; }
+              table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+              th, td { border: 1px solid #e2e8f0; padding: 12px; text-align: left; }
+              th { background-color: #f1f5f9; font-weight: bold; }
+              .alerta { background-color: #fee2e2; }
+            </style>
+          </head>
+          <body>
+            <h1>Relatório Financeiro - TCO</h1>
+            <p><strong>Data:</strong> ${new Date().toLocaleDateString('pt-BR')}</p>
+            
+            <div class="info">
+              <h3>Resumo Geral</h3>
+              <p><strong>Custo Total de Manutenção:</strong> R$ ${dados.custoTotalGeral?.toFixed(2)}</p>
+              <p><strong>Ativos para Substituir:</strong> ${dados.ativosParaSubstituir?.length}</p>
+            </div>
+            
+            ${dados.ativosParaSubstituir?.length > 0 ? `
+              <h3>Ativos Recomendados para Substituição</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Código</th>
+                    <th>Nome</th>
+                    <th>Valor Residual</th>
+                    <th>CTM</th>
+                    <th>% CTM</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${dados.ativosParaSubstituir.map(ativo => `
+                    <tr class="alerta">
+                      <td>${ativo.codigo}</td>
+                      <td>${ativo.nome}</td>
+                      <td>R$ ${ativo.valorResidual.toFixed(2)}</td>
+                      <td>R$ ${ativo.custoTotalManutencao.toFixed(2)}</td>
+                      <td>${ativo.percentualCTMsobreResidual.toFixed(0)}%</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            ` : ''}
+          </body>
+        </html>
+      `;
+    }
+
+    // Criar Blob e fazer download
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `relatorio_${tipo}_${new Date().getTime()}.html`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <Button
+      onClick={handleExportar}
+      disabled={isLoading || !dados}
+      variant="outline"
+      className="gap-2"
+    >
+      {isLoading ? (
+        <>
+          <Loader2 className="w-4 h-4 animate-spin" />
+          Gerando...
+        </>
+      ) : (
+        <>
+          <FileDown className="w-4 h-4" />
+          Exportar PDF/HTML
+        </>
+      )}
+    </Button>
+  );
+}

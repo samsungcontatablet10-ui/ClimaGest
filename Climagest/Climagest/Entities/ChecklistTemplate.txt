@@ -1,0 +1,56 @@
+{
+  "name": "ChecklistTemplate",
+  "type": "object",
+  "properties": {
+    "nome": {
+      "type": "string",
+      "description": "Nome do checklist (ex: MP-0266R-MENSAL-AR CONDICIONADO JANELA)"
+    },
+    "tipo_ativo": {
+      "type": "string",
+      "enum": [
+        "ar_condicionado",
+        "mecalor",
+        "ar_maquina"
+      ],
+      "description": "Tipo de ativo que usa este checklist"
+    },
+    "frequencia": {
+      "type": "string",
+      "enum": [
+        "mensal",
+        "trimestral",
+        "semestral",
+        "anual"
+      ],
+      "description": "Frequência de aplicação"
+    },
+    "itens": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "numero": {
+            "type": "string"
+          },
+          "descricao": {
+            "type": "string"
+          },
+          "categoria": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "Lista de itens do checklist"
+    },
+    "observacoes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "nome",
+    "tipo_ativo",
+    "frequencia",
+    "itens"
+  ]
+}

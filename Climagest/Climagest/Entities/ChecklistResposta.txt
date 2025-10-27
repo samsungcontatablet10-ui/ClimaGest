@@ -1,0 +1,73 @@
+{
+  "name": "ChecklistResposta",
+  "type": "object",
+  "properties": {
+    "ativo_id": {
+      "type": "string",
+      "description": "ID do ativo"
+    },
+    "checklist_template_id": {
+      "type": "string",
+      "description": "ID do template usado"
+    },
+    "tecnico_email": {
+      "type": "string"
+    },
+    "data_execucao": {
+      "type": "string",
+      "format": "date"
+    },
+    "tipo_manutencao": {
+      "type": "string",
+      "enum": [
+        "preventiva_mensal",
+        "preventiva_semestral",
+        "corretiva"
+      ],
+      "description": "Tipo de manutenção executada"
+    },
+    "respostas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "item_numero": {
+            "type": "string"
+          },
+          "realizado_sim": {
+            "type": "boolean"
+          },
+          "realizado_nao": {
+            "type": "boolean"
+          },
+          "observacao": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "fotos_anexadas": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "aprovado_apos_servico": {
+      "type": "boolean",
+      "description": "Aprovação final após execução"
+    },
+    "observacoes_gerais": {
+      "type": "string"
+    },
+    "assinatura_digital": {
+      "type": "string",
+      "description": "Base64 da assinatura do técnico"
+    }
+  },
+  "required": [
+    "ativo_id",
+    "checklist_template_id",
+    "tecnico_email",
+    "tipo_manutencao"
+  ]
+}

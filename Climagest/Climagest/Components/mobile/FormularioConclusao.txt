@@ -1,0 +1,278 @@
+import React, { useState } from 'react';
+import { base44 } from "@/api/base44Client";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Camera, Image as ImageIcon, Save, Loader2 } from "lucide-react";
+import { format } from "date-fns";
+
+export default function FormularioConclusaoOS({ os, ativo, tecnico, onConcluir }) {
+  const [formData, setFormData] = useState({
+    horas_gastas: '',
+    custo_pecas: '',
+    custo_mao_obra_externa: '',
+    descricao_servico_realizado: '',
+    observacoes: ''
+  });
+  const [fotosAntes, setFotosAntes] = useState([]);
+  const [fotosDepois, setFotosDepois] = useState([]);
+  const [uploadingFotos, setUploadingFotos] = useState(false);
+
+  const queryClient = useQueryClient();
+
+  const updateOSMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.OrdemServico.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ordensServico'] });
+      onConcluir();
+    },
+  });
+
+  const handleFotoCapture = async (e, tipo) => {
+    const files = Array.from(e.target.files);
+    setUploadingFotos(true);
+
+    try {
+      const urls = [];
+      for (const file of files) {
+        const { file_url } = await base44.integrations.Core.UploadFile({ file });
+        urls.push(file_url);
+      }
+
+      if (tipo === 'antes') {
+        setFotosAntes(prev => [...prev, ...urls]);
+      } else {
+        setFotosDepois(prev => [...prev, ...urls]);
+      }
+    } catch (error) {
+      console.error("Erro ao fazer upload:", error);
+    }
+    
+    setUploadingFotos(false);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    const custoTotal = 
+      (parseFloat(formData.custo_pecas) || 0) + 
+      (parseFloat(formData.custo_mao_obra_externa) || 0);
+
+    const dataAtualizacao = {
+      status: 'concluida',
+      data_conclusao: format(new Date(), 'yyyy-MM-dd'),
+      tecnico_responsavel: tecnico?.email || 'tecnico@gac.com',
+      horas_gastas: parseFloat(formData.horas_gastas) || 0,
+      custo_pecas: parseFloat(formData.custo_pecas) || 0,
+      custo_mao_obra_externa: parseFloat(formData.custo_mao_obra_externa) || 0,
+      custo_total: custoTotal,
+      descricao_servico_realizado: formData.descricao_servico_realizado,
+      observacoes: formData.observacoes,
+      fotos_antes: fotosAntes,
+      fotos_depois: fotosDepois
+    };
+
+    updateOSMutation.mutate({ id: os.id, data: dataAtualizacao });
+  };
+
+  const removeFoto = (tipo, index) => {
+    if (tipo === 'antes') {
+      setFotosAntes(prev => prev.filter((_, i) => i !== index));
+    } else {
+      setFotosDepois(prev => prev.filter((_, i) => i !== index));
+    }
+  };
+
+  return (
+    <Card className="shadow-2xl border-none">
+      <CardHeader className="bg-gradient-to-r from-orange-500 to-orange-600 text-white">
+        <CardTitle className="text-xl">Concluir Ordem de Serviço</CardTitle>
+        <p className="text-sm text-orange-100 mt-1">{os.numero_os}</p>
+      </CardHeader>
+      <CardContent className="p-6">
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Fotos Antes */}
+          <div className="space-y-3">
+            <Label className="text-base font-semibold">Fotos - Estado Inicial</Label>
+            <div className="grid grid-cols-3 gap-2 mb-2">
+              {fotosAntes.map((url, idx) => (
+                <div key={idx} className="relative aspect-square">
+                  <img src={url} alt={`Antes ${idx + 1}`} className="w-full h-full object-cover rounded-lg" />
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    className="absolute top-1 right-1 h-6 w-6 p-0"
+                    onClick={() => removeFoto('antes', idx)}
+                  >
+                    ×
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <div>
+              <input
+                type="file"
+                accept="image/*,video/*"
+                capture="environment"
+                multiple
+                onChange={(e) => handleFotoCapture(e, 'antes')}
+                className="hidden"
+                id="foto-antes"
+                disabled={uploadingFotos}
+              />
+              <label htmlFor="foto-antes">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  disabled={uploadingFotos}
+                  onClick={() => document.getElementById('foto-antes').click()}
+                >
+                  {uploadingFotos ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Camera className="w-4 h-4 mr-2" />
+                  )}
+                  Tirar Fotos - Antes
+                </Button>
+              </label>
+            </div>
+          </div>
+
+          {/* Descrição do Serviço */}
+          <div className="space-y-2">
+            <Label htmlFor="descricao">Descrição do Serviço Realizado *</Label>
+            <Textarea
+              id="descricao"
+              value={formData.descricao_servico_realizado}
+              onChange={(e) => setFormData(prev => ({ ...prev, descricao_servico_realizado: e.target.value }))}
+              rows={4}
+              required
+              placeholder="Descreva detalhadamente o serviço executado..."
+            />
+          </div>
+
+          {/* Horas Gastas */}
+          <div className="space-y-2">
+            <Label htmlFor="horas">Horas Gastas no Serviço *</Label>
+            <Input
+              id="horas"
+              type="number"
+              step="0.5"
+              value={formData.horas_gastas}
+              onChange={(e) => setFormData(prev => ({ ...prev, horas_gastas: e.target.value }))}
+              required
+            />
+          </div>
+
+          {/* Custos */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="custo_pecas">Custo Peças (R$)</Label>
+              <Input
+                id="custo_pecas"
+                type="number"
+                step="0.01"
+                value={formData.custo_pecas}
+                onChange={(e) => setFormData(prev => ({ ...prev, custo_pecas: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="custo_mao_obra">M.O. Externa (R$)</Label>
+              <Input
+                id="custo_mao_obra"
+                type="number"
+                step="0.01"
+                value={formData.custo_mao_obra_externa}
+                onChange={(e) => setFormData(prev => ({ ...prev, custo_mao_obra_externa: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          {/* Fotos Depois */}
+          <div className="space-y-3">
+            <Label className="text-base font-semibold">Fotos - Estado Final</Label>
+            <div className="grid grid-cols-3 gap-2 mb-2">
+              {fotosDepois.map((url, idx) => (
+                <div key={idx} className="relative aspect-square">
+                  <img src={url} alt={`Depois ${idx + 1}`} className="w-full h-full object-cover rounded-lg" />
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    className="absolute top-1 right-1 h-6 w-6 p-0"
+                    onClick={() => removeFoto('depois', idx)}
+                  >
+                    ×
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <div>
+              <input
+                type="file"
+                accept="image/*,video/*"
+                capture="environment"
+                multiple
+                onChange={(e) => handleFotoCapture(e, 'depois')}
+                className="hidden"
+                id="foto-depois"
+                disabled={uploadingFotos}
+              />
+              <label htmlFor="foto-depois">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  disabled={uploadingFotos}
+                  onClick={() => document.getElementById('foto-depois').click()}
+                >
+                  {uploadingFotos ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Camera className="w-4 h-4 mr-2" />
+                  )}
+                  Tirar Fotos - Depois
+                </Button>
+              </label>
+            </div>
+          </div>
+
+          {/* Observações */}
+          <div className="space-y-2">
+            <Label htmlFor="obs">Observações Adicionais</Label>
+            <Textarea
+              id="obs"
+              value={formData.observacoes}
+              onChange={(e) => setFormData(prev => ({ ...prev, observacoes: e.target.value }))}
+              rows={2}
+            />
+          </div>
+
+          {/* Botão Salvar */}
+          <Button
+            type="submit"
+            className="w-full bg-green-600 hover:bg-green-700 py-6 text-lg"
+            disabled={updateOSMutation.isPending || uploadingFotos}
+          >
+            {updateOSMutation.isPending ? (
+              <>
+                <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                Salvando...
+              </>
+            ) : (
+              <>
+                <Save className="w-5 h-5 mr-2" />
+                Concluir Ordem de Serviço
+              </>
+            )}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}

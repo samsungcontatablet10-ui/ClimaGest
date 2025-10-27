@@ -1,0 +1,398 @@
+
+import React, { useState } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Plus, Search, X, MapPin } from "lucide-react"; // Added MapPin
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge"; // Added Badge
+import { format } from 'date-fns'; // Added format from date-fns
+
+import FormularioOS from "../components/os/FormularioOS";
+import ListaOS from "../components/os/ListaOS";
+
+export default function OrdensServico() {
+  const [showForm, setShowForm] = useState(false);
+  const [editingOS, setEditingOS] = useState(null);
+  const [viewingOS, setViewingOS] = useState(null);
+  
+  // Filtros
+  const [filtroNumeroOS, setFiltroNumeroOS] = useState('');
+  const [filtroAtivo, setFiltroAtivo] = useState('');
+  const [filtroStatus, setFiltroStatus] = useState('todos');
+  const [filtroTipo, setFiltroTipo] = useState('todos');
+  
+  const queryClient = useQueryClient();
+
+  const { data: ordensServico, isLoading: loadingOS } = useQuery({
+    queryKey: ['ordensServico'],
+    queryFn: () => base44.entities.OrdemServico.list('-created_date'),
+    initialData: [],
+  });
+
+  const { data: ativos, isLoading: loadingAtivos } = useQuery({
+    queryKey: ['ativos'],
+    queryFn: () => base44.entities.Ativo.list(),
+    initialData: [],
+  });
+
+  const createOSMutation = useMutation({
+    mutationFn: (osData) => base44.entities.OrdemServico.create(osData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ordensServico'] });
+      setShowForm(false);
+      setEditingOS(null);
+    },
+  });
+
+  const updateOSMutation = useMutation({
+    mutationFn: ({ id, osData }) => base44.entities.OrdemServico.update(id, osData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ordensServico'] });
+      setShowForm(false);
+      setEditingOS(null);
+    },
+  });
+
+  const handleSubmit = async (osData) => {
+    if (editingOS) {
+      updateOSMutation.mutate({ id: editingOS.id, osData });
+    } else {
+      createOSMutation.mutate(osData);
+    }
+  };
+
+  const handleEdit = (os) => {
+    setEditingOS(os);
+    setShowForm(true);
+  };
+
+  const handleLimparFiltros = () => {
+    setFiltroNumeroOS('');
+    setFiltroAtivo('');
+    setFiltroStatus('todos');
+    setFiltroTipo('todos');
+  };
+
+  // Aplicar filtros
+  const ordensFiltradas = ordensServico.filter(os => {
+    // Filtro por número da OS
+    if (filtroNumeroOS && !os.numero_os.toLowerCase().includes(filtroNumeroOS.toLowerCase())) {
+      return false;
+    }
+    
+    // Filtro por ativo
+    if (filtroAtivo && (!os.ativo_codigo || !os.ativo_codigo.toLowerCase().includes(filtroAtivo.toLowerCase()))) {
+      return false;
+    }
+    
+    // Filtro por status
+    if (filtroStatus !== 'todos' && os.status !== filtroStatus) {
+      return false;
+    }
+    
+    // Filtro por tipo
+    if (filtroTipo !== 'todos' && os.tipo_os !== filtroTipo) {
+      return false;
+    }
+    
+    return true;
+  });
+
+  const isLoading = loadingOS || loadingAtivos;
+  const temFiltrosAtivos = filtroNumeroOS || filtroAtivo || filtroStatus !== 'todos' || filtroTipo !== 'todos';
+
+  const getAtivoDetalhes = (ativoId) => {
+    return ativos.find(a => a.id === ativoId);
+  };
+
+  return (
+    <div className="min-h-screen p-4 md:p-8">
+      <div className="max-w-7xl mx-auto space-y-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 className="text-4xl font-bold text-slate-900 mb-2">Ordens de Serviço</h1>
+            <p className="text-slate-600">Gestão de manutenções preventivas e corretivas</p>
+          </div>
+          <Button 
+            onClick={() => setShowForm(!showForm)}
+            className="bg-orange-600 hover:bg-orange-700"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Nova OS
+          </Button>
+        </div>
+
+        {/* Card de Filtros */}
+        <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Search className="w-5 h-5 text-slate-600" />
+              <h2 className="text-lg font-bold text-slate-900">Filtros de Busca</h2>
+            </div>
+            {temFiltrosAtivos && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleLimparFiltros}
+                className="text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+              >
+                <X className="w-4 h-4 mr-1" />
+                Limpar Filtros
+              </Button>
+            )}
+          </div>
+
+          <div className="grid md:grid-cols-4 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="filtro-numero">Número da OS</Label>
+              <Input
+                id="filtro-numero"
+                placeholder="Ex: OS-001"
+                value={filtroNumeroOS}
+                onChange={(e) => setFiltroNumeroOS(e.target.value)}
+                className="h-10"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="filtro-ativo">Código do Ativo</Label>
+              <Input
+                id="filtro-ativo"
+                placeholder="Ex: AC-001"
+                value={filtroAtivo}
+                onChange={(e) => setFiltroAtivo(e.target.value)}
+                className="h-10"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="filtro-status">Status</Label>
+              <Select value={filtroStatus} onValueChange={setFiltroStatus}>
+                <SelectTrigger id="filtro-status" className="h-10">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos</SelectItem>
+                  <SelectItem value="pendente">Pendente</SelectItem>
+                  <SelectItem value="em_andamento">Em Andamento</SelectItem>
+                  <SelectItem value="concluida">Concluída</SelectItem>
+                  <SelectItem value="cancelada">Cancelada</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="filtro-tipo">Tipo</Label>
+              <Select value={filtroTipo} onValueChange={setFiltroTipo}>
+                <SelectTrigger id="filtro-tipo" className="h-10">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos</SelectItem>
+                  <SelectItem value="preventiva">Preventiva</SelectItem>
+                  <SelectItem value="corretiva">Corretiva</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {temFiltrosAtivos && (
+            <div className="mt-4 pt-4 border-t border-slate-200">
+              <p className="text-sm text-slate-600">
+                Mostrando <span className="font-bold text-orange-600">{ordensFiltradas.length}</span> de {ordensServico.length} ordens de serviço
+              </p>
+            </div>
+          )}
+        </div>
+
+        {showForm && (
+          <FormularioOS
+            os={editingOS}
+            ativos={ativos}
+            onSave={handleSubmit}
+            onCancel={() => {
+              setShowForm(false);
+              setEditingOS(null);
+            }}
+            isProcessing={createOSMutation.isPending || updateOSMutation.isPending}
+          />
+        )}
+
+        <ListaOS
+          ordensServico={ordensFiltradas}
+          isLoading={isLoading}
+          onView={setViewingOS}
+          onEdit={handleEdit}
+        />
+
+        <Dialog open={!!viewingOS} onOpenChange={() => setViewingOS(null)}>
+          <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="text-2xl font-bold">
+                Ordem de Serviço - {viewingOS?.numero_os}
+              </DialogTitle>
+            </DialogHeader>
+            {viewingOS && (
+              <div className="space-y-6 py-4">
+                {/* Informações do Ativo */}
+                {(() => {
+                  const ativo = viewingOS.ativo_id ? getAtivoDetalhes(viewingOS.ativo_id) : null;
+                  return ativo ? (
+                    <div className="bg-gradient-to-r from-blue-50 to-slate-50 rounded-xl p-6 border border-blue-200">
+                      <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+                        <MapPin className="w-5 h-5 text-blue-600" />
+                        Informações do Equipamento
+                      </h3>
+                      <div className="grid md:grid-cols-2 gap-6">
+                        <div className="space-y-3">
+                          <div>
+                            <p className="text-sm text-slate-500">Código do Ativo</p>
+                            <p className="font-bold text-lg text-slate-900">{ativo.codigo}</p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-slate-500">Nome do Equipamento</p>
+                            <p className="font-semibold text-slate-900">{ativo.nome}</p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-slate-500">Tipo</p>
+                            <p className="font-medium text-slate-700">{ativo.tipo_ativo}</p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-slate-500">Localização</p>
+                            <p className="font-semibold text-blue-700">{ativo.localizacao_primaria}</p>
+                            {ativo.sub_localizacao && (
+                              <p className="text-sm text-slate-600">{ativo.sub_localizacao}</p>
+                            )}
+                          </div>
+                          <div>
+                            <p className="text-sm text-slate-500">Fabricante / Modelo</p>
+                            <p className="font-medium text-slate-700">
+                              {ativo.fabricante || '-'} / {ativo.modelo || '-'}
+                            </p>
+                          </div>
+                        </div>
+                        
+                        {/* Mapa da Localização */}
+                        <div className="bg-white rounded-lg p-4 border-2 border-dashed border-slate-300">
+                          <p className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                            <MapPin className="w-4 h-4" />
+                            Localização no Mapa
+                          </p>
+                          <div className="bg-slate-100 h-48 rounded-lg flex items-center justify-center">
+                            <div className="text-center">
+                              <MapPin className="w-12 h-12 text-blue-600 mx-auto mb-2" />
+                              <p className="text-sm font-bold text-slate-700">{ativo.localizacao_primaria}</p>
+                              {ativo.sub_localizacao && (
+                                <p className="text-xs text-slate-500 mt-1">{ativo.sub_localizacao}</p>
+                              )}
+                              {ativo.ponto_wifi && (
+                                <p className="text-xs text-blue-600 mt-2">📡 {ativo.ponto_wifi}</p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null;
+                })()}
+
+                {/* Detalhes da OS */}
+                <div className="bg-white rounded-xl p-6 border border-slate-200">
+                  <h3 className="text-lg font-bold text-slate-900 mb-4">Detalhes da Ordem de Serviço</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                      <p className="text-sm text-slate-500">Tipo</p>
+                      <p className="font-semibold text-slate-900 capitalize">{viewingOS.tipo_os}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-slate-500">Status</p>
+                      <Badge className={
+                        viewingOS.status === 'concluida' ? 'bg-green-100 text-green-800' :
+                        viewingOS.status === 'em_andamento' ? 'bg-blue-100 text-blue-800' :
+                        viewingOS.status === 'pendente' ? 'bg-orange-100 text-orange-800' :
+                        'bg-gray-100 text-gray-800'
+                      }>
+                        {viewingOS.status.charAt(0).toUpperCase() + viewingOS.status.slice(1).replace(/_/g, ' ')}
+                      </Badge>
+                    </div>
+                    <div>
+                      <p className="text-sm text-slate-500">Prioridade</p>
+                      <Badge className={
+                        viewingOS.prioridade === 'urgente' ? 'bg-red-100 text-red-800' :
+                        viewingOS.prioridade === 'alta' ? 'bg-orange-100 text-orange-800' :
+                        viewingOS.prioridade === 'media' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-blue-100 text-blue-800'
+                      }>
+                        {viewingOS.prioridade.charAt(0).toUpperCase() + viewingOS.prioridade.slice(1)}
+                      </Badge>
+                    </div>
+                    <div>
+                      <p className="text-sm text-slate-500">Data Prevista</p>
+                      <p className="font-medium text-slate-900">
+                        {viewingOS.data_prevista ? format(new Date(viewingOS.data_prevista), 'dd/MM/yyyy') : '-'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {viewingOS.descricao_problema && (
+                  <div className="bg-orange-50 rounded-xl p-6 border border-orange-200">
+                    <p className="text-sm font-semibold text-orange-900 mb-2">Descrição do Problema</p>
+                    <p className="text-slate-800">{viewingOS.descricao_problema}</p>
+                  </div>
+                )}
+
+                {viewingOS.descricao_servico_realizado && (
+                  <div className="bg-green-50 rounded-xl p-6 border border-green-200">
+                    <p className="text-sm font-semibold text-green-900 mb-2">Serviço Realizado</p>
+                    <p className="text-slate-800">{viewingOS.descricao_servico_realizado}</p>
+                  </div>
+                )}
+
+                {/* Fotos Antes e Depois */}
+                {(viewingOS.fotos_antes?.length > 0 || viewingOS.fotos_depois?.length > 0) && (
+                  <div className="grid md:grid-cols-2 gap-4">
+                    {viewingOS.fotos_antes?.length > 0 && (
+                      <div>
+                        <p className="text-sm font-semibold text-slate-700 mb-3">📸 Fotos Antes</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {viewingOS.fotos_antes.map((url, idx) => (
+                            <img 
+                              key={idx} 
+                              src={url} 
+                              alt={`Antes ${idx + 1}`}
+                              className="w-full h-32 object-cover rounded-lg border-2 border-slate-200"
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {viewingOS.fotos_depois?.length > 0 && (
+                      <div>
+                        <p className="text-sm font-semibold text-slate-700 mb-3">📸 Fotos Depois</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {viewingOS.fotos_depois.map((url, idx) => (
+                            <img 
+                              key={idx} 
+                              src={url} 
+                              alt={`Depois ${idx + 1}`}
+                              className="w-full h-32 object-cover rounded-lg border-2 border-green-300"
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+      </div>
+    </div>
+  );
+}

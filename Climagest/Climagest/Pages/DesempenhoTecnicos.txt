@@ -1,0 +1,285 @@
+import React, { useMemo } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Users, CheckCircle, Clock, TrendingUp, Award } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
+import { Skeleton } from "@/components/ui/skeleton";
+
+import KPICard from "../components/dashboard/KPICard";
+import ExportarPDF from "../components/relatorios/ExportarPDF";
+
+export default function DesempenhoTecnicos() {
+  const { data: ordensServico, isLoading: loadingOS } = useQuery({
+    queryKey: ['ordensServico'],
+    queryFn: () => base44.entities.OrdemServico.list(),
+    initialData: [],
+  });
+
+  const { data: checklistRespostas, isLoading: loadingChecklists } = useQuery({
+    queryKey: ['checklistRespostas'],
+    queryFn: () => base44.entities.ChecklistResposta.list(),
+    initialData: [],
+  });
+
+  const dadosTecnicos = useMemo(() => {
+    const tecnicos = {};
+
+    ordensServico.forEach(os => {
+      if (os.tecnico_responsavel && os.status === 'concluida') {
+        if (!tecnicos[os.tecnico_responsavel]) {
+          tecnicos[os.tecnico_responsavel] = {
+            email: os.tecnico_responsavel,
+            nome: os.tecnico_responsavel.split('@')[0],
+            os_concluidas: 0,
+            os_preventivas: 0,
+            os_corretivas: 0,
+            horas_totais: 0,
+            custo_total: 0,
+            checklists_aprovados: 0,
+            media_tempo_conclusao: 0
+          };
+        }
+
+        const tecnico = tecnicos[os.tecnico_responsavel];
+        tecnico.os_concluidas++;
+        if (os.tipo_os === 'preventiva') tecnico.os_preventivas++;
+        if (os.tipo_os === 'corretiva') tecnico.os_corretivas++;
+        tecnico.horas_totais += os.horas_gastas || 0;
+        tecnico.custo_total += os.custo_total || 0;
+      }
+    });
+
+    checklistRespostas.forEach(resp => {
+      if (resp.tecnico_email && tecnicos[resp.tecnico_email]) {
+        if (resp.aprovado_apos_servico) {
+          tecnicos[resp.tecnico_email].checklists_aprovados++;
+        }
+      }
+    });
+
+    return Object.values(tecnicos).sort((a, b) => b.os_concluidas - a.os_concluidas);
+  }, [ordensServico, checklistRespostas]);
+
+  const estatisticasGerais = useMemo(() => {
+    const totalOS = ordensServico.filter(os => os.status === 'concluida').length;
+    const totalTecnicos = dadosTecnicos.length;
+    const mediaOSPorTecnico = totalTecnicos > 0 ? (totalOS / totalTecnicos).toFixed(1) : 0;
+    const totalHoras = dadosTecnicos.reduce((sum, t) => sum + t.horas_totais, 0);
+
+    return {
+      totalOS,
+      totalTecnicos,
+      mediaOSPorTecnico,
+      totalHoras: totalHoras.toFixed(1)
+    };
+  }, [dadosTecnicos, ordensServico]);
+
+  const dadosGrafico = dadosTecnicos.slice(0, 5).map(t => ({
+    nome: t.nome,
+    'Preventivas': t.os_preventivas,
+    'Corretivas': t.os_corretivas
+  }));
+
+  const dadosPizza = [
+    { name: 'Preventivas', value: dadosTecnicos.reduce((sum, t) => sum + t.os_preventivas, 0) },
+    { name: 'Corretivas', value: dadosTecnicos.reduce((sum, t) => sum + t.os_corretivas, 0) }
+  ];
+
+  const COLORS = ['#10b981', '#f59e0b'];
+
+  const isLoading = loadingOS || loadingChecklists;
+
+  return (
+    <div className="min-h-screen p-4 md:p-8">
+      <div className="max-w-7xl mx-auto space-y-8">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 className="text-4xl font-bold text-slate-900 mb-2">Desempenho dos Técnicos</h1>
+            <p className="text-slate-600">Análise de produtividade e qualidade do trabalho</p>
+          </div>
+          <ExportarPDF dados={dadosTecnicos} tipo="desempenho-tecnicos" />
+        </div>
+
+        {isLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-32 rounded-xl" />)}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <KPICard
+              title="Total de Técnicos"
+              value={estatisticasGerais.totalTecnicos}
+              subtitle="Ativos no sistema"
+              icon={Users}
+              color="blue"
+            />
+            <KPICard
+              title="OS Concluídas"
+              value={estatisticasGerais.totalOS}
+              subtitle="No total"
+              icon={CheckCircle}
+              color="green"
+            />
+            <KPICard
+              title="Média OS/Técnico"
+              value={estatisticasGerais.mediaOSPorTecnico}
+              subtitle="Por técnico"
+              icon={TrendingUp}
+              color="purple"
+            />
+            <KPICard
+              title="Total de Horas"
+              value={`${estatisticasGerais.totalHoras}h`}
+              subtitle="Trabalhadas"
+              icon={Clock}
+              color="orange"
+            />
+          </div>
+        )}
+
+        <div className="grid lg:grid-cols-2 gap-6">
+          {!isLoading && dadosGrafico.length > 0 && (
+            <Card className="shadow-lg border-none">
+              <CardHeader className="border-b border-slate-200 bg-gradient-to-r from-blue-50 to-purple-50">
+                <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-900">
+                  <TrendingUp className="w-5 h-5 text-blue-600" />
+                  Top 5 Técnicos - Preventivas vs Corretivas
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-6">
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={dadosGrafico}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="nome" stroke="#64748b" />
+                    <YAxis stroke="#64748b" />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px' }}
+                    />
+                    <Legend />
+                    <Bar dataKey="Preventivas" fill="#10b981" radius={[8, 8, 0, 0]} />
+                    <Bar dataKey="Corretivas" fill="#f59e0b" radius={[8, 8, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          )}
+
+          {!isLoading && dadosPizza.some(d => d.value > 0) && (
+            <Card className="shadow-lg border-none">
+              <CardHeader className="border-b border-slate-200 bg-gradient-to-r from-green-50 to-orange-50">
+                <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-900">
+                  <Award className="w-5 h-5 text-green-600" />
+                  Distribuição de OS
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-6">
+                <ResponsiveContainer width="100%" height={300}>
+                  <PieChart>
+                    <Pie
+                      data={dadosPizza}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                      outerRadius={100}
+                      fill="#8884d8"
+                      dataKey="value"
+                    >
+                      {dadosPizza.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {!isLoading && dadosTecnicos.length > 0 && (
+          <Card className="shadow-lg border-none">
+            <CardHeader className="border-b border-slate-200 bg-gradient-to-r from-blue-50 to-purple-50">
+              <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-900">
+                <Award className="w-5 h-5 text-blue-600" />
+                Ranking de Desempenho
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6">
+              <div className="space-y-4">
+                {dadosTecnicos.map((tecnico, index) => (
+                  <div 
+                    key={tecnico.email}
+                    className={`p-4 rounded-xl border-2 transition-all ${
+                      index === 0 
+                        ? 'bg-gradient-to-r from-yellow-50 to-amber-50 border-yellow-400' 
+                        : index === 1
+                        ? 'bg-gradient-to-r from-slate-50 to-gray-50 border-slate-300'
+                        : index === 2
+                        ? 'bg-gradient-to-r from-orange-50 to-amber-50 border-orange-300'
+                        : 'bg-white border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="relative">
+                        <Avatar className="w-12 h-12">
+                          <AvatarFallback className={`${
+                            index === 0 ? 'bg-yellow-500' :
+                            index === 1 ? 'bg-slate-400' :
+                            index === 2 ? 'bg-orange-500' :
+                            'bg-blue-500'
+                          } text-white font-bold`}>
+                            {tecnico.nome.substring(0, 2).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        {index < 3 && (
+                          <div className="absolute -top-1 -right-1 w-6 h-6 bg-white rounded-full flex items-center justify-center shadow-md">
+                            <span className="text-xs font-bold">#{index + 1}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex-1">
+                        <h3 className="font-bold text-slate-900">{tecnico.nome}</h3>
+                        <p className="text-sm text-slate-600">{tecnico.email}</p>
+                      </div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                        <div>
+                          <p className="text-2xl font-bold text-blue-600">{tecnico.os_concluidas}</p>
+                          <p className="text-xs text-slate-500">OS Total</p>
+                        </div>
+                        <div>
+                          <p className="text-2xl font-bold text-green-600">{tecnico.os_preventivas}</p>
+                          <p className="text-xs text-slate-500">Preventivas</p>
+                        </div>
+                        <div>
+                          <p className="text-2xl font-bold text-orange-600">{tecnico.os_corretivas}</p>
+                          <p className="text-xs text-slate-500">Corretivas</p>
+                        </div>
+                        <div>
+                          <p className="text-2xl font-bold text-purple-600">{tecnico.horas_totais.toFixed(0)}h</p>
+                          <p className="text-xs text-slate-500">Horas</p>
+                        </div>
+                      </div>
+
+                      {tecnico.checklists_aprovados > 0 && (
+                        <Badge className="bg-green-500">
+                          <CheckCircle className="w-3 h-3 mr-1" />
+                          {tecnico.checklists_aprovados} ✓
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,203 @@
+
+import React, { useMemo } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { DollarSign, TrendingDown, AlertTriangle, BarChart3 } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { Skeleton } from "@/components/ui/skeleton";
+import { differenceInYears } from "date-fns";
+
+import KPICard from "../components/dashboard/KPICard";
+import ExportarPDF from "../components/relatorios/ExportarPDF";
+
+export default function RelatoriosFinanceiros() {
+  const { data: ativos, isLoading: loadingAtivos } = useQuery({
+    queryKey: ['ativos'],
+    queryFn: () => base44.entities.Ativo.list(),
+    initialData: [],
+  });
+
+  const { data: ordensServico, isLoading: loadingOS } = useQuery({
+    queryKey: ['ordensServico'],
+    queryFn: () => base44.entities.OrdemServico.list(),
+    initialData: [],
+  });
+
+  const dadosFinanceiros = useMemo(() => {
+    const ativosComAnalise = ativos.map(ativo => {
+      const osDoAtivo = ordensServico.filter(os => os.ativo_id === ativo.id);
+      const custoTotalManutencao = osDoAtivo.reduce((sum, os) => sum + (os.custo_total || 0), 0);
+      
+      const anosDeUso = ativo.data_aquisicao 
+        ? differenceInYears(new Date(), new Date(ativo.data_aquisicao))
+        : 0;
+      
+      const depreciacao = (ativo.valor_compra || 0) * (anosDeUso / (ativo.vida_util_anos || 10));
+      const valorResidual = (ativo.valor_compra || 0) - depreciacao;
+      
+      const percentualCTMsobreResidual = valorResidual > 0 
+        ? (custoTotalManutencao / valorResidual) * 100 
+        : 0;
+
+      return {
+        ...ativo,
+        custoTotalManutencao,
+        depreciacao,
+        valorResidual,
+        percentualCTMsobreResidual,
+        recomendarSubstituicao: percentualCTMsobreResidual > 50
+      };
+    });
+
+    const custoTotalGeral = ativosComAnalise.reduce((sum, a) => sum + a.custoTotalManutencao, 0);
+    const ativosParaSubstituir = ativosComAnalise.filter(a => a.recomendarSubstituicao);
+
+    const dadosPorTipo = {};
+    ativosComAnalise.forEach(ativo => {
+      if (!dadosPorTipo[ativo.tipo_ativo]) {
+        dadosPorTipo[ativo.tipo_ativo] = {
+          tipo: ativo.tipo_ativo,
+          quantidade: 0,
+          custoTotal: 0,
+          valorTotal: 0
+        };
+      }
+      dadosPorTipo[ativo.tipo_ativo].quantidade++;
+      dadosPorTipo[ativo.tipo_ativo].custoTotal += ativo.custoTotalManutencao;
+      dadosPorTipo[ativo.tipo_ativo].valorTotal += ativo.valor_compra || 0;
+    });
+
+    return {
+      ativosComAnalise,
+      custoTotalGeral,
+      ativosParaSubstituir,
+      dadosGrafico: Object.values(dadosPorTipo)
+    };
+  }, [ativos, ordensServico]);
+
+  const isLoading = loadingAtivos || loadingOS;
+
+  return (
+    <div className="min-h-screen p-4 md:p-8">
+      <div className="max-w-7xl mx-auto space-y-8">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 className="text-4xl font-bold text-slate-900 mb-2">Relatórios Financeiros</h1>
+            <p className="text-slate-600">Análise de custos e decisões de substituição (TCO)</p>
+          </div>
+          <ExportarPDF dados={dadosFinanceiros} tipo="financeiro" />
+        </div>
+
+        {isLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {[1, 2, 3].map(i => <Skeleton key={i} className="h-32 rounded-xl" />)}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <KPICard
+              title="Custo Total de Manutenção"
+              value={`R$ ${dadosFinanceiros.custoTotalGeral.toFixed(2)}`}
+              subtitle="Acumulado de todas as OS"
+              icon={DollarSign}
+              color="blue"
+            />
+            <KPICard
+              title="Depreciação Total"
+              value={`R$ ${dadosFinanceiros.ativosComAnalise.reduce((s, a) => s + a.depreciacao, 0).toFixed(2)}`}
+              subtitle="Soma de todos os ativos"
+              icon={TrendingDown}
+              color="purple"
+            />
+            <KPICard
+              title="Ativos p/ Substituir"
+              value={dadosFinanceiros.ativosParaSubstituir.length}
+              subtitle="CTM > 50% do valor residual"
+              icon={AlertTriangle}
+              color="red"
+            />
+          </div>
+        )}
+
+        {!isLoading && dadosFinanceiros.dadosGrafico.length > 0 && (
+          <Card className="shadow-lg border-none">
+            <CardHeader className="border-b border-slate-200 bg-gradient-to-r from-blue-50 to-purple-50">
+              <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-900">
+                <BarChart3 className="w-5 h-5 text-blue-600" />
+                Custo por Tipo de Ativo
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6">
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={dadosFinanceiros.dadosGrafico}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="tipo" stroke="#64748b" />
+                  <YAxis stroke="#64748b" />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px' }}
+                  />
+                  <Legend />
+                  <Bar dataKey="custoTotal" fill="#3b82f6" name="Custo Total (R$)" radius={[8, 8, 0, 0]} />
+                  <Bar dataKey="valorTotal" fill="#8b5cf6" name="Valor dos Ativos (R$)" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
+
+        {!isLoading && dadosFinanceiros.ativosParaSubstituir.length > 0 && (
+          <Card className="shadow-lg border-none">
+            <CardHeader className="border-b border-slate-200 bg-gradient-to-r from-red-50 to-orange-50">
+              <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-900">
+                <AlertTriangle className="w-5 h-5 text-red-600" />
+                Recomendações de Substituição
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6">
+              <div className="space-y-4">
+                {dadosFinanceiros.ativosParaSubstituir.map(ativo => (
+                  <div key={ativo.id} className="p-4 bg-red-50 border border-red-200 rounded-xl">
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <p className="font-bold text-slate-900">{ativo.codigo} - {ativo.nome}</p>
+                        <p className="text-sm text-slate-600">{ativo.localizacao_primaria}</p>
+                      </div>
+                      <Badge variant="destructive">
+                        {ativo.percentualCTMsobreResidual.toFixed(0)}% CTM
+                      </Badge>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      <div>
+                        <p className="text-slate-500">Valor Residual</p>
+                        <p className="font-semibold text-slate-900">R$ {ativo.valorResidual.toFixed(2)}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500">Custo Manutenção</p>
+                        <p className="font-semibold text-red-600">R$ {ativo.custoTotalManutencao.toFixed(2)}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500">Depreciação</p>
+                        <p className="font-semibold text-slate-700">R$ {ativo.depreciacao.toFixed(2)}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500">Valor Original</p>
+                        <p className="font-semibold text-slate-700">R$ {(ativo.valor_compra || 0).toFixed(2)}</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 p-3 bg-white rounded-lg">
+                      <p className="text-sm text-red-700 font-medium">
+                        ⚠️ O custo de manutenção excede {ativo.percentualCTMsobreResidual.toFixed(0)}% do valor residual. 
+                        Considere substituir este ativo.
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}

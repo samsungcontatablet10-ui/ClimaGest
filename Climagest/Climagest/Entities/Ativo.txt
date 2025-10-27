@@ -1,0 +1,116 @@
+{
+  "name": "Ativo",
+  "type": "object",
+  "properties": {
+    "codigo": {
+      "type": "string",
+      "description": "Código único do ativo (ex: AC-001)"
+    },
+    "tipo_ativo": {
+      "type": "string",
+      "enum": [
+        "ar_condicionado",
+        "mecalor",
+        "ar_maquina"
+      ],
+      "description": "Tipo do equipamento"
+    },
+    "nome": {
+      "type": "string",
+      "description": "Nome/descrição do ativo"
+    },
+    "fabricante": {
+      "type": "string"
+    },
+    "modelo": {
+      "type": "string"
+    },
+    "numero_serie": {
+      "type": "string"
+    },
+    "capacidade": {
+      "type": "number",
+      "description": "Capacidade em BTUs ou Toneladas"
+    },
+    "unidade_capacidade": {
+      "type": "string",
+      "enum": [
+        "BTU",
+        "Toneladas"
+      ],
+      "default": "BTU"
+    },
+    "tipo_gas_refrigerante": {
+      "type": "string",
+      "description": "Tipo de gás/fluido refrigerante"
+    },
+    "localizacao_primaria": {
+      "type": "string",
+      "description": "Ex: Galpão A, Edifício B"
+    },
+    "sub_localizacao": {
+      "type": "string",
+      "description": "Ex: Sala CPD, Linha de Produção 4"
+    },
+    "ponto_wifi": {
+      "type": "string",
+      "description": "SSID do Wi-Fi ou ID do Beacon próximo"
+    },
+    "qr_code_url": {
+      "type": "string",
+      "description": "URL do QR code gerado para o ativo"
+    },
+    "data_aquisicao": {
+      "type": "string",
+      "format": "date"
+    },
+    "valor_compra": {
+      "type": "number",
+      "description": "Valor de aquisição em R$"
+    },
+    "vida_util_anos": {
+      "type": "number",
+      "description": "Vida útil estimada em anos",
+      "default": 10
+    },
+    "frequencia_preventiva": {
+      "type": "string",
+      "enum": [
+        "mensal",
+        "trimestral",
+        "semestral",
+        "anual"
+      ],
+      "default": "trimestral"
+    },
+    "ultima_manutencao": {
+      "type": "string",
+      "format": "date",
+      "description": "Data da última manutenção preventiva"
+    },
+    "proxima_manutencao": {
+      "type": "string",
+      "format": "date",
+      "description": "Data prevista para próxima manutenção"
+    },
+    "status_operacional": {
+      "type": "string",
+      "enum": [
+        "operacional",
+        "manutencao",
+        "quebrado",
+        "inativo"
+      ],
+      "default": "operacional"
+    },
+    "observacoes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "codigo",
+    "tipo_ativo",
+    "nome",
+    "localizacao_primaria"
+  ]
+}

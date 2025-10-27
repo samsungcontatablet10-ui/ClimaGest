@@ -1,0 +1,444 @@
+import React, { useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
+import { base44 } from "@/api/base44Client";
+import { useQuery } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ArrowLeft, Package, Wrench, TrendingDown, Calendar, DollarSign, Image, FileText } from "lucide-react";
+import { format, differenceInDays } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from "recharts";
+import { Link } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+
+export default function HistoricoAtivo() {
+  const [searchParams] = useSearchParams();
+  const ativoId = searchParams.get('id');
+
+  const { data: ativo, isLoading: loadingAtivo } = useQuery({
+    queryKey: ['ativo', ativoId],
+    queryFn: async () => {
+      const ativos = await base44.entities.Ativo.list();
+      return ativos.find(a => a.id === ativoId);
+    },
+    enabled: !!ativoId
+  });
+
+  const { data: ordensServico, isLoading: loadingOS } = useQuery({
+    queryKey: ['ordensServico', ativoId],
+    queryFn: async () => {
+      const allOS = await base44.entities.OrdemServico.list('-created_date');
+      return allOS.filter(os => os.ativo_id === ativoId);
+    },
+    initialData: [],
+    enabled: !!ativoId
+  });
+
+  const { data: checklistRespostas } = useQuery({
+    queryKey: ['checklistRespostas', ativoId],
+    queryFn: async () => {
+      const all = await base44.entities.ChecklistResposta.list('-created_date');
+      return all.filter(c => c.ativo_id === ativoId);
+    },
+    initialData: [],
+    enabled: !!ativoId
+  });
+
+  const { data: pecasUtilizadas } = useQuery({
+    queryKey: ['pecasUtilizadas', ativoId],
+    queryFn: async () => {
+      const all = await base44.entities.PecaUtilizada.list();
+      const osIds = ordensServico.map(os => os.id);
+      return all.filter(p => osIds.includes(p.ordem_servico_id));
+    },
+    initialData: [],
+    enabled: !!ativoId && ordensServico.length > 0
+  });
+
+  const estatisticas = useMemo(() => {
+    const totalOS = ordensServico.length;
+    const osConcluidas = ordensServico.filter(os => os.status === 'concluida').length;
+    const osPreventivas = ordensServico.filter(os => os.tipo_os === 'preventiva').length;
+    const osCorretivas = ordensServico.filter(os => os.tipo_os === 'corretiva').length;
+    const custoTotal = ordensServico.reduce((sum, os) => sum + (os.custo_total || 0), 0);
+    const horasTotais = ordensServico.reduce((sum, os) => sum + (os.horas_gastas || 0), 0);
+    
+    // Calcular MTBF (Mean Time Between Failures) - tempo médio entre falhas
+    const falhas = ordensServico.filter(os => os.tipo_os === 'corretiva' && os.data_conclusao);
+    let mtbf = 0;
+    if (falhas.length > 1) {
+      const intervalos = [];
+      for (let i = 1; i < falhas.length; i++) {
+        const dias = differenceInDays(
+          new Date(falhas[i].data_conclusao),
+          new Date(falhas[i-1].data_conclusao)
+        );
+        intervalos.push(dias);
+      }
+      mtbf = intervalos.reduce((a, b) => a + b, 0) / intervalos.length;
+    }
+
+    return {
+      totalOS,
+      osConcluidas,
+      osPreventivas,
+      osCorretivas,
+      custoTotal,
+      horasTotais,
+      mtbf: mtbf.toFixed(0)
+    };
+  }, [ordensServico]);
+
+  const dadosGraficoCusto = useMemo(() => {
+    return ordensServico
+      .filter(os => os.data_conclusao && os.custo_total)
+      .map(os => ({
+        data: format(new Date(os.data_conclusao), 'MMM/yy', { locale: ptBR }),
+        custo: os.custo_total,
+        tipo: os.tipo_os
+      }))
+      .reverse();
+  }, [ordensServico]);
+
+  const dadosGraficoFrequencia = useMemo(() => {
+    const porMes = {};
+    ordensServico.forEach(os => {
+      if (os.data_abertura) {
+        const mes = format(new Date(os.data_abertura), 'MMM/yy', { locale: ptBR });
+        if (!porMes[mes]) {
+          porMes[mes] = { mes, preventivas: 0, corretivas: 0 };
+        }
+        if (os.tipo_os === 'preventiva') {
+          porMes[mes].preventivas++;
+        } else {
+          porMes[mes].corretivas++;
+        }
+      }
+    });
+    return Object.values(porMes);
+  }, [ordensServico]);
+
+  if (loadingAtivo || !ativo) {
+    return (
+      <div className="min-h-screen p-8 flex items-center justify-center">
+        <p className="text-slate-600">Carregando...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen p-4 md:p-8">
+      <div className="max-w-7xl mx-auto space-y-6">
+        <div className="flex items-center gap-4">
+          <Link to={createPageUrl('Ativos')}>
+            <Button variant="outline" size="icon">
+              <ArrowLeft className="w-4 h-4" />
+            </Button>
+          </Link>
+          <div>
+            <h1 className="text-4xl font-bold text-slate-900">Histórico Completo</h1>
+            <p className="text-slate-600">{ativo.codigo} - {ativo.nome}</p>
+          </div>
+        </div>
+
+        {/* Informações do Ativo */}
+        <Card className="shadow-lg border-none bg-gradient-to-r from-blue-50 to-purple-50">
+          <CardContent className="p-6">
+            <div className="grid md:grid-cols-4 gap-6">
+              <div>
+                <p className="text-sm text-slate-500 mb-1">Código</p>
+                <p className="text-2xl font-bold text-slate-900">{ativo.codigo}</p>
+              </div>
+              <div>
+                <p className="text-sm text-slate-500 mb-1">Tipo</p>
+                <Badge variant="outline" className="text-lg">{ativo.tipo_ativo}</Badge>
+              </div>
+              <div>
+                <p className="text-sm text-slate-500 mb-1">Localização</p>
+                <p className="font-semibold text-slate-900">{ativo.localizacao_primaria}</p>
+              </div>
+              <div>
+                <p className="text-sm text-slate-500 mb-1">Status</p>
+                <Badge className={
+                  ativo.status_operacional === 'operacional' ? 'bg-green-500' :
+                  ativo.status_operacional === 'manutencao' ? 'bg-blue-500' :
+                  ativo.status_operacional === 'quebrado' ? 'bg-red-500' :
+                  'bg-gray-500'
+                }>
+                  {ativo.status_operacional}
+                </Badge>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* KPIs */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card className="border-none shadow-lg">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-500">Total de OSs</p>
+                  <p className="text-3xl font-bold text-blue-600">{estatisticas.totalOS}</p>
+                </div>
+                <Wrench className="w-8 h-8 text-blue-600 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-none shadow-lg">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-500">Custo Total</p>
+                  <p className="text-3xl font-bold text-purple-600">R$ {estatisticas.custoTotal.toFixed(0)}</p>
+                </div>
+                <DollarSign className="w-8 h-8 text-purple-600 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-none shadow-lg">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-500">Horas Totais</p>
+                  <p className="text-3xl font-bold text-orange-600">{estatisticas.horasTotais.toFixed(0)}h</p>
+                </div>
+                <Calendar className="w-8 h-8 text-orange-600 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-none shadow-lg">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-500">MTBF (dias)</p>
+                  <p className="text-3xl font-bold text-green-600">{estatisticas.mtbf || '-'}</p>
+                </div>
+                <TrendingDown className="w-8 h-8 text-green-600 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Gráficos */}
+        <div className="grid lg:grid-cols-2 gap-6">
+          {dadosGraficoCusto.length > 0 && (
+            <Card className="shadow-lg border-none">
+              <CardHeader className="border-b">
+                <CardTitle>Evolução de Custos</CardTitle>
+              </CardHeader>
+              <CardContent className="p-6">
+                <ResponsiveContainer width="100%" height={250}>
+                  <LineChart data={dadosGraficoCusto}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="data" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Line type="monotone" dataKey="custo" stroke="#8b5cf6" strokeWidth={2} name="Custo (R$)" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          )}
+
+          {dadosGraficoFrequencia.length > 0 && (
+            <Card className="shadow-lg border-none">
+              <CardHeader className="border-b">
+                <CardTitle>Frequência de Manutenções</CardTitle>
+              </CardHeader>
+              <CardContent className="p-6">
+                <ResponsiveContainer width="100%" height={250}>
+                  <BarChart data={dadosGraficoFrequencia}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="mes" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="preventivas" fill="#10b981" name="Preventivas" />
+                    <Bar dataKey="corretivas" fill="#f59e0b" name="Corretivas" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* Timeline de Manutenções */}
+        <Card className="shadow-lg border-none">
+          <CardHeader className="border-b bg-gradient-to-r from-blue-50 to-slate-50">
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-blue-600" />
+              Timeline de Manutenções
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="space-y-4">
+              {ordensServico.length === 0 ? (
+                <p className="text-center text-slate-500 py-8">Nenhuma manutenção registrada</p>
+              ) : (
+                ordensServico.map((os, index) => {
+                  const checklistOS = checklistRespostas.find(c => 
+                    c.data_execucao === os.data_conclusao
+                  );
+                  const pecasOS = pecasUtilizadas.filter(p => p.ordem_servico_id === os.id);
+
+                  return (
+                    <div key={os.id} className="relative pl-8 pb-8 border-l-2 border-slate-200 last:border-0 last:pb-0">
+                      <div className={`absolute -left-3 top-0 w-6 h-6 rounded-full flex items-center justify-center ${
+                        os.status === 'concluida' ? 'bg-green-500' :
+                        os.status === 'em_andamento' ? 'bg-blue-500' :
+                        os.status === 'pendente' ? 'bg-orange-500' :
+                        'bg-gray-500'
+                      }`}>
+                        {os.status === 'concluida' ? (
+                          <Wrench className="w-3 h-3 text-white" />
+                        ) : (
+                          <div className="w-2 h-2 bg-white rounded-full" />
+                        )}
+                      </div>
+
+                      <Card className="shadow-md hover:shadow-lg transition-shadow">
+                        <CardContent className="p-4">
+                          <div className="flex justify-between items-start mb-3">
+                            <div>
+                              <p className="font-bold text-lg text-slate-900">{os.numero_os}</p>
+                              <p className="text-sm text-slate-600">
+                                {os.data_abertura && format(new Date(os.data_abertura), 'dd/MM/yyyy', { locale: ptBR })}
+                              </p>
+                            </div>
+                            <div className="flex gap-2">
+                              <Badge className={
+                                os.tipo_os === 'preventiva' ? 'bg-green-100 text-green-800' : 'bg-orange-100 text-orange-800'
+                              }>
+                                {os.tipo_os}
+                              </Badge>
+                              <Badge className={
+                                os.status === 'concluida' ? 'bg-green-500' :
+                                os.status === 'em_andamento' ? 'bg-blue-500' :
+                                'bg-orange-500'
+                              }>
+                                {os.status}
+                              </Badge>
+                            </div>
+                          </div>
+
+                          {os.descricao_problema && (
+                            <p className="text-sm text-slate-700 mb-3 bg-slate-50 p-3 rounded-lg">
+                              {os.descricao_problema}
+                            </p>
+                          )}
+
+                          {os.descricao_servico_realizado && (
+                            <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-3">
+                              <p className="text-sm font-semibold text-green-900 mb-1">Serviço Realizado:</p>
+                              <p className="text-sm text-green-800">{os.descricao_servico_realizado}</p>
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                            {os.tecnico_responsavel && (
+                              <div>
+                                <p className="text-slate-500">Técnico</p>
+                                <p className="font-medium text-slate-900">{os.tecnico_responsavel.split('@')[0]}</p>
+                              </div>
+                            )}
+                            {os.horas_gastas && (
+                              <div>
+                                <p className="text-slate-500">Horas</p>
+                                <p className="font-medium text-slate-900">{os.horas_gastas}h</p>
+                              </div>
+                            )}
+                            {os.custo_total && (
+                              <div>
+                                <p className="text-slate-500">Custo</p>
+                                <p className="font-medium text-purple-600">R$ {os.custo_total.toFixed(2)}</p>
+                              </div>
+                            )}
+                            {os.data_conclusao && (
+                              <div>
+                                <p className="text-slate-500">Concluída em</p>
+                                <p className="font-medium text-green-600">
+                                  {format(new Date(os.data_conclusao), 'dd/MM/yyyy')}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Peças Utilizadas */}
+                          {pecasOS.length > 0 && (
+                            <div className="mt-3 pt-3 border-t">
+                              <p className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-1">
+                                <Package className="w-4 h-4" />
+                                Peças Utilizadas ({pecasOS.length})
+                              </p>
+                              <div className="space-y-1">
+                                {pecasOS.map(peca => (
+                                  <div key={peca.id} className="flex justify-between text-sm bg-slate-50 p-2 rounded">
+                                    <span className="text-slate-700">{peca.peca_nome} (x{peca.quantidade})</span>
+                                    <span className="font-medium text-slate-900">R$ {peca.custo_total.toFixed(2)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Fotos */}
+                          {(os.fotos_antes?.length > 0 || os.fotos_depois?.length > 0) && (
+                            <div className="mt-3 pt-3 border-t">
+                              <p className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-1">
+                                <Image className="w-4 h-4" />
+                                Fotos
+                              </p>
+                              <div className="grid grid-cols-4 gap-2">
+                                {os.fotos_antes?.map((url, idx) => (
+                                  <img 
+                                    key={`antes-${idx}`}
+                                    src={url}
+                                    alt="Antes"
+                                    className="w-full h-20 object-cover rounded border-2 border-red-300"
+                                  />
+                                ))}
+                                {os.fotos_depois?.map((url, idx) => (
+                                  <img 
+                                    key={`depois-${idx}`}
+                                    src={url}
+                                    alt="Depois"
+                                    className="w-full h-20 object-cover rounded border-2 border-green-300"
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Checklist */}
+                          {checklistOS && (
+                            <div className="mt-3 pt-3 border-t">
+                              <div className="flex items-center justify-between">
+                                <p className="text-sm font-semibold text-slate-700 flex items-center gap-1">
+                                  <FileText className="w-4 h-4" />
+                                  Checklist Executado
+                                </p>
+                                <Badge className={checklistOS.aprovado_apos_servico ? 'bg-green-500' : 'bg-red-500'}>
+                                  {checklistOS.aprovado_apos_servico ? 'Aprovado' : 'Reprovado'}
+                                </Badge>
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}

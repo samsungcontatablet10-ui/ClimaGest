@@ -1,0 +1,218 @@
+import React, { useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
+import { CheckCircle, Camera, Save, AlertCircle } from "lucide-react";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+
+import AssinaturaDigital from "./AssinaturaDigital";
+
+export default function ChecklistExecucao({ checklist, ativo, onSalvar, onVoltar }) {
+  const [respostas, setRespostas] = useState({});
+  const [observacoesGerais, setObservacoesGerais] = useState('');
+  const [aprovado, setAprovado] = useState(false);
+  const [mostrarAssinatura, setMostrarAssinatura] = useState(false);
+  const [assinatura, setAssinatura] = useState(null);
+
+  const handleResposta = (itemNumero, tipo, valor) => {
+    setRespostas(prev => ({
+      ...prev,
+      [itemNumero]: {
+        ...prev[itemNumero],
+        [tipo]: valor,
+        ...(tipo === 'sim' && valor ? { nao: false } : {}),
+        ...(tipo === 'nao' && valor ? { sim: false } : {})
+      }
+    }));
+  };
+
+  const handleObservacaoItem = (itemNumero, texto) => {
+    setRespostas(prev => ({
+      ...prev,
+      [itemNumero]: {
+        ...prev[itemNumero],
+        observacao: texto
+      }
+    }));
+  };
+
+  const calcularProgresso = () => {
+    const total = checklist.itens.length;
+    const respondidos = Object.keys(respostas).filter(k => 
+      respostas[k]?.sim || respostas[k]?.nao
+    ).length;
+    return Math.round((respondidos / total) * 100);
+  };
+
+  const handleSalvarAssinatura = (assinaturaData) => {
+    setAssinatura(assinaturaData);
+    setMostrarAssinatura(false);
+    
+    const respostasFormatadas = checklist.itens.map(item => ({
+      item_numero: item.numero,
+      realizado_sim: respostas[item.numero]?.sim || false,
+      realizado_nao: respostas[item.numero]?.nao || false,
+      observacao: respostas[item.numero]?.observacao || ''
+    }));
+
+    onSalvar({
+      checklist_template_id: checklist.id,
+      respostas: respostasFormatadas,
+      observacoes_gerais: observacoesGerais,
+      aprovado_apos_servico: aprovado,
+      assinatura_digital: assinaturaData
+    });
+  };
+
+  const progresso = calcularProgresso();
+  const completo = progresso === 100;
+
+  return (
+    <div className="space-y-4">
+      <Card className="bg-gradient-to-r from-blue-600 to-blue-700 text-white border-none">
+        <CardContent className="p-6">
+          <div className="flex items-start justify-between mb-3">
+            <div>
+              <h2 className="text-2xl font-bold mb-2">{checklist.nome}</h2>
+              <p className="text-blue-100">{ativo.codigo} - {ativo.nome}</p>
+            </div>
+            <Badge className="bg-white text-blue-700 text-lg px-3 py-1">
+              {progresso}%
+            </Badge>
+          </div>
+          
+          <div className="w-full bg-blue-800 rounded-full h-3 mt-4">
+            <div 
+              className="bg-white h-3 rounded-full transition-all duration-300"
+              style={{ width: `${progresso}%` }}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="bg-slate-50">
+          <CardTitle className="text-lg">Itens de Verificação</CardTitle>
+        </CardHeader>
+        <CardContent className="p-4">
+          <div className="space-y-4">
+            {checklist.itens.map((item, idx) => (
+              <div key={idx} className="border-b border-slate-200 pb-4 last:border-0">
+                <div className="flex items-start gap-3 mb-3">
+                  <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0">
+                    {item.numero}
+                  </div>
+                  <p className="flex-1 font-medium text-slate-900 pt-1">
+                    {item.descricao}
+                  </p>
+                </div>
+
+                <div className="flex gap-6 ml-11 mb-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={respostas[item.numero]?.sim || false}
+                      onCheckedChange={(checked) => handleResposta(item.numero, 'sim', checked)}
+                      className="data-[state=checked]:bg-green-600 data-[state=checked]:border-green-600"
+                    />
+                    <span className="text-sm font-medium text-slate-700">SIM</span>
+                  </label>
+                  
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={respostas[item.numero]?.nao || false}
+                      onCheckedChange={(checked) => handleResposta(item.numero, 'nao', checked)}
+                      className="data-[state=checked]:bg-red-600 data-[state=checked]:border-red-600"
+                    />
+                    <span className="text-sm font-medium text-slate-700">NÃO</span>
+                  </label>
+                </div>
+
+                {respostas[item.numero]?.nao && (
+                  <div className="ml-11 mt-2">
+                    <Textarea
+                      placeholder="Descreva o problema ou observação..."
+                      value={respostas[item.numero]?.observacao || ''}
+                      onChange={(e) => handleObservacaoItem(item.numero, e.target.value)}
+                      rows={2}
+                      className="text-sm"
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-4">
+          <label className="block mb-2 font-semibold text-slate-900">
+            Observações Gerais / Revisões
+          </label>
+          <Textarea
+            placeholder="Digite observações adicionais, revisões realizadas, etc..."
+            value={observacoesGerais}
+            onChange={(e) => setObservacoesGerais(e.target.value)}
+            rows={4}
+          />
+        </CardContent>
+      </Card>
+
+      <Card className={`${aprovado ? 'border-2 border-green-500' : ''}`}>
+        <CardContent className="p-4">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <Checkbox
+              checked={aprovado}
+              onCheckedChange={setAprovado}
+              disabled={!completo}
+              className="w-6 h-6 data-[state=checked]:bg-green-600 data-[state=checked]:border-green-600"
+            />
+            <div className="flex-1">
+              <p className="font-bold text-slate-900">
+                ✓ APROVADO APÓS SERVIÇO
+              </p>
+              <p className="text-sm text-slate-600">
+                Confirme que o equipamento está em perfeitas condições
+              </p>
+            </div>
+          </label>
+          {!completo && (
+            <p className="text-sm text-orange-600 mt-2 flex items-center gap-1">
+              <AlertCircle className="w-4 h-4" />
+              Complete todos os itens para aprovar
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="flex gap-3">
+        <Button
+          variant="outline"
+          onClick={onVoltar}
+          className="flex-1"
+        >
+          Voltar
+        </Button>
+        <Button
+          onClick={() => setMostrarAssinatura(true)}
+          disabled={!completo || !aprovado}
+          className="flex-1 bg-green-600 hover:bg-green-700 h-14 text-lg font-bold"
+        >
+          <Save className="w-5 h-5 mr-2" />
+          Assinar e Salvar
+        </Button>
+      </div>
+
+      <Dialog open={mostrarAssinatura} onOpenChange={setMostrarAssinatura}>
+        <DialogContent className="sm:max-w-2xl">
+          <AssinaturaDigital
+            onSalvar={handleSalvarAssinatura}
+            onCancelar={() => setMostrarAssinatura(false)}
+          />
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
